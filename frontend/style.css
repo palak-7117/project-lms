@@ -1,0 +1,584 @@
+
+/* ========================================
+   1. DESIGN SYSTEM
+======================================== */
+
+:root {
+    --linen: #F1F2EB;
+    --dust-grey: #D8DAD3;
+    --sage: #A4C2A5;
+    --olive: #566246;
+    --charcoal: #4A4A48;
+
+    --ink: #34382F;
+    --muted-ink: #74776D;
+    --border: rgba(86, 98, 70, 0.20);
+
+    --paper-light: url("assets/images/paper-light.png");
+    --paper-warm: url("assets/images/paper-warm.png");
+
+    --radius-card: 8px;
+    --page-width: 1120px;
+}
+
+/* ========================================
+   2. RESET AND BASE STYLES
+======================================== */
+
+* {
+    box-sizing: border-box;
+}
+
+[hidden] {
+    display: none !important;
+}
+
+html {
+    min-height: 100%;
+    background: var(--linen);
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    color: var(--ink);
+    font-family: "Trebuchet MS", Arial, sans-serif;
+    background-color: var(--linen);
+    background-image:
+        linear-gradient(rgba(255, 255, 255, 0.12),
+                        rgba(255, 255, 255, 0.12)),
+        var(--paper-light);
+    background-position: center;
+    background-size: cover;
+    background-attachment: fixed;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+button {
+    -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible {
+    outline: 3px solid var(--olive);
+    outline-offset: 4px;
+}
+
+/* ========================================
+   3. MAIN PAGE LAYOUT
+======================================== */
+
+.page-shell {
+    width: min(100% - 64px, var(--page-width));
+    min-height: 100vh;
+    margin-inline: auto;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    z-index: 1;
+    transition: filter 350ms ease;
+}
+
+.site-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 20px;
+    padding: 30px 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--ink);
+    text-decoration: none;
+}
+
+.brand-icon {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    background-color: var(--olive);
+    color: var(--linen);
+    border-radius: 50%;
+    font-family: Georgia, serif;
+    font-size: 26px;
+}
+
+.brand-name,
+.brand-tagline {
+    display: block;
+}
+
+.brand-name {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 23px;
+    letter-spacing: -0.7px;
+}
+
+.brand-tagline {
+    margin-top: 3px;
+    font-size: 11px;
+    letter-spacing: 1.2px;
+    color: var(--muted-ink);
+}
+
+.header-note {
+    font-size: 12px;
+    color: var(--muted-ink);
+    letter-spacing: 0.5px;
+}
+
+/* ========================================
+   4. WELCOME SECTION
+======================================== */
+
+.welcome-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 64px 0 48px;
+}
+
+.eyebrow {
+    margin: 0 0 18px;
+    color: var(--olive);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+}
+
+.welcome-section > .eyebrow,
+.welcome-section > h1,
+.welcome-description {
+    text-align: center;
+}
+
+.welcome-section h1 {
+    margin: 0;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: clamp(42px, 6vw, 68px);
+    font-weight: 400;
+    letter-spacing: -2.5px;
+    line-height: 1.08;
+}
+
+.welcome-section h1 span {
+    color: var(--olive);
+    font-style: italic;
+}
+
+.welcome-description {
+    max-width: 440px;
+    margin: 22px auto 42px;
+    color: var(--muted-ink);
+    font-size: 14px;
+    line-height: 1.8;
+}
+
+/* ========================================
+   5. STUDENT AND TEACHER CARDS
+======================================== */
+
+.role-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px;
+    width: 100%;
+    max-width: 830px;
+    margin: 0 auto;
+}
+
+.role-card {
+    position: relative;
+    isolation: isolate;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-height: 300px;
+    padding: 26px;
+    overflow: hidden;
+    border: 1px solid rgba(86, 98, 70, 0.24);
+    border-radius: var(--radius-card);
+    color: var(--ink);
+    text-align: left;
+    cursor: pointer;
+
+    background-color: #E9E5D8;
+    background-image:
+        linear-gradient(rgba(232, 226, 210, 0.46),
+                        rgba(232, 226, 210, 0.46)),
+        var(--paper-warm);
+    background-position: center;
+    background-size: cover;
+
+    box-shadow: 0 8px 24px rgba(57, 58, 44, 0.05);
+
+    transition:
+        transform 250ms ease,
+        box-shadow 250ms ease,
+        border-color 250ms ease;
+}
+
+.teacher-card {
+    background-color: #DDE5D7;
+    background-image:
+        linear-gradient(rgba(205, 220, 201, 0.48),
+                        rgba(205, 220, 201, 0.48)),
+        var(--paper-warm);
+}
+
+.role-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 16px 35px rgba(57, 58, 44, 0.12);
+    border-color: var(--olive);
+}
+
+.card-topline {
+    display: flex;
+    width: 100%;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.role-number {
+    color: var(--olive);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+}
+
+.role-arrow {
+    font-size: 25px;
+    color: var(--olive);
+}
+
+.role-illustration {
+    display: grid;
+    place-items: center;
+    width: 58px;
+    height: 58px;
+    margin: 25px 0 18px;
+    border-radius: 50%;
+    font-size: 32px;
+    color: var(--olive);
+    background: rgba(255, 255, 255, 0.36);
+    border: 1px solid rgba(86, 98, 70, 0.16);
+}
+
+.teacher-illustration {
+    background: rgba(164, 194, 165, 0.30);
+}
+
+.role-title {
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 31px;
+    line-height: 1.2;
+}
+
+.role-description {
+    max-width: 260px;
+    margin-top: 10px;
+    color: #64675C;
+    font-size: 13px;
+    line-height: 1.7;
+}
+
+.card-action {
+    margin-top: auto;
+    padding-top: 24px;
+    color: var(--olive);
+    font-size: 12px;
+    font-weight: 700;
+}
+
+/* ========================================
+   6. FOOTER
+======================================== */
+
+.privacy-note {
+    margin: 30px 0 0;
+    color: var(--muted-ink);
+    text-align: center;
+    font-size: 11px;
+    letter-spacing: 0.3px;
+}
+
+.site-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 0;
+    border-top: 1px solid var(--border);
+    color: var(--muted-ink);
+    font-size: 9px;
+    letter-spacing: 1.2px;
+}
+
+/* ========================================
+   7. BACKGROUND BLUR
+======================================== */
+
+.backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: rgba(35, 38, 30, 0.20);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+    opacity: 0;
+    transition: opacity 300ms ease;
+}
+
+.backdrop.is-visible {
+    opacity: 1;
+}
+
+/* ========================================
+   8. SELECTED ROLE CARD
+======================================== */
+
+.role-card.is-selected {
+    position: fixed;
+    z-index: 20;
+    top: 50%;
+    left: 50%;
+    width: min(420px, calc(100vw - 36px));
+    min-height: 310px;
+    transform: translate(-50%, -50%) scale(1.04);
+    box-shadow: 0 25px 80px rgba(24, 27, 20, 0.24);
+    cursor: default;
+}
+
+.role-card.is-dimmed {
+    opacity: 0.18;
+    pointer-events: none;
+}
+
+/* ========================================
+   9. LOGIN PANEL
+======================================== */
+
+.login-panel {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    z-index: 30;
+    width: min(390px, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+    padding: 34px;
+    border: 1px solid rgba(86, 98, 70, 0.28);
+    border-radius: 10px;
+    text-align: center;
+
+    color: var(--ink);
+    background-color: var(--linen);
+    background-image:
+        linear-gradient(rgba(241, 242, 235, 0.90),
+                        rgba(241, 242, 235, 0.90)),
+        var(--paper-light);
+    background-position: center;
+    background-size: cover;
+
+    box-shadow: 0 30px 100px rgba(20, 24, 17, 0.25);
+
+    transform: translate(-50%, -46%) scale(0.96);
+    opacity: 0;
+    transition:
+        transform 300ms ease,
+        opacity 300ms ease;
+}
+
+.login-panel.is-visible {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 1;
+}
+
+.close-button {
+    position: absolute;
+    top: 12px;
+    right: 15px;
+    width: 34px;
+    height: 34px;
+    border: none;
+    border-radius: 50%;
+    background: rgba(86, 98, 70, 0.09);
+    color: var(--ink);
+    font-size: 25px;
+    cursor: pointer;
+}
+
+.login-panel .eyebrow {
+    margin: 10px 0 16px;
+    font-size: 9px;
+}
+
+.login-symbol {
+    display: grid;
+    place-items: center;
+    width: 48px;
+    height: 48px;
+    margin: 0 auto 15px;
+    border-radius: 50%;
+    background: var(--olive);
+    color: white;
+    font-size: 27px;
+}
+
+.login-panel h2 {
+    margin: 0;
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 34px;
+    font-weight: 400;
+    letter-spacing: -0.7px;
+}
+
+.login-subtitle {
+    margin: 12px 0 25px;
+    color: var(--muted-ink);
+    font-size: 12px;
+    line-height: 1.7;
+}
+
+#loginForm {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+
+#loginForm label {
+    margin: 0 0 7px;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+#loginForm input {
+    width: 100%;
+    min-height: 44px;
+    margin-bottom: 17px;
+    padding: 12px;
+    border: 1px solid #D0D2C7;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.66);
+    color: var(--ink);
+    font-size: 13px;
+}
+
+#loginForm input::placeholder {
+    color: #8A8C83;
+}
+
+.submit-button {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 46px;
+    padding: 0 16px;
+    border: none;
+    border-radius: 5px;
+    background: var(--olive);
+    color: white;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background 200ms ease;
+}
+
+.submit-button:hover {
+    background: #414B34;
+}
+
+.form-message {
+    margin: 10px 0 0;
+    color: #8B453C;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.login-footnote {
+    margin: 18px 0 0;
+    color: var(--muted-ink);
+    font-family: Georgia, "Times New Roman", serif;
+    font-size: 12px;
+    font-style: italic;
+}
+
+/* ========================================
+   10. MOBILE RESPONSIVENESS
+======================================== */
+
+@media (max-width: 640px) {
+    .page-shell {
+        width: min(100% - 32px, var(--page-width));
+    }
+
+    .site-header {
+        padding: 20px 0;
+    }
+
+    .header-note {
+        display: none;
+    }
+
+    .welcome-section {
+        padding: 52px 0 35px;
+    }
+
+    .welcome-section h1 {
+        font-size: clamp(42px, 12vw, 58px);
+    }
+
+    .welcome-description {
+        max-width: 330px;
+        margin-bottom: 30px;
+    }
+
+    .role-grid {
+        grid-template-columns: 1fr;
+        gap: 15px;
+        max-width: 420px;
+    }
+
+    .role-card {
+        min-height: 245px;
+        padding: 22px;
+    }
+
+    .role-illustration {
+        margin: 18px 0 12px;
+    }
+
+    .role-card.is-selected {
+        min-height: 280px;
+    }
+
+    .login-panel {
+        padding: 30px 24px;
+    }
+
+    .site-footer {
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
