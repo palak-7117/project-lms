@@ -24,13 +24,18 @@
                 </span>
             </a>
 
-            <span class="header-note">Your learning journey starts here.</span>
+            <span class="header-note">
+                Your learning journey starts here.
+            </span>
         </header>
 
         <section class="welcome-section">
             <p class="eyebrow">LEARN · EXPLORE · GROW</p>
 
-            <h1>A little space<br>for <span>big ideas.</span></h1>
+            <h1>
+                A little space<br>
+                for <span>big ideas.</span>
+            </h1>
 
             <p class="welcome-description">
                 Your classes, your resources, your progress —
@@ -39,12 +44,14 @@
 
             <div class="role-grid" id="roleGrid">
 
+                <!-- Student login selection -->
                 <button
                     class="role-card student-card"
                     type="button"
                     data-role="student"
                     aria-haspopup="dialog"
                     aria-controls="loginPanel"
+                    aria-pressed="false"
                 >
                     <span class="card-topline">
                         <span class="role-number">01 / LEARNER</span>
@@ -64,12 +71,14 @@
                     <span class="card-action">Enter your space →</span>
                 </button>
 
+                <!-- Teacher login selection -->
                 <button
                     class="role-card teacher-card"
                     type="button"
                     data-role="teacher"
                     aria-haspopup="dialog"
                     aria-controls="loginPanel"
+                    aria-pressed="false"
                 >
                     <span class="card-topline">
                         <span class="role-number">02 / EDUCATOR</span>
@@ -102,10 +111,10 @@
         </footer>
     </main>
 
-    <!-- Dim and blur the background when a role is selected. -->
+    <!-- Blurred background -->
     <div class="backdrop" id="backdrop" hidden></div>
 
-    <!-- This panel is a frontend demonstration, not real authentication. -->
+    <!-- Role-specific login panel -->
     <section
         class="login-panel"
         id="loginPanel"
@@ -134,6 +143,7 @@
 
         <form id="loginForm">
             <label for="email">Email address</label>
+
             <input
                 id="email"
                 name="email"
@@ -144,21 +154,33 @@
             >
 
             <label for="password">Password</label>
-            <input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="Enter your password"
-                autocomplete="current-password"
-                required
-            >
+
+            <div class="password-wrapper">
+                <input
+                    id="password"
+                    name="password"
+                    type="password"
+                    placeholder="Enter your password"
+                    autocomplete="current-password"
+                    required
+                >
+
+                <button
+                    type="button"
+                    class="password-toggle"
+                    id="togglePassword"
+                    aria-label="Show password"
+                    aria-controls="password"
+                    aria-pressed="false"
+                >Show</button>
+            </div>
 
             <button class="submit-button" type="submit">
                 Continue <span aria-hidden="true">→</span>
             </button>
 
-            <p class="form-message" id="formMessage" role="status"
-               aria-live="polite"></p>
+            <p class="form-message" id="formMessage"
+               role="status" aria-live="polite"></p>
         </form>
 
         <p class="login-footnote">

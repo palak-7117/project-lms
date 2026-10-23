@@ -12,14 +12,29 @@ const loginSymbol = document.querySelector("#loginSymbol");
 const emailInput = document.querySelector("#email");
 const formMessage = document.querySelector("#formMessage");
 
+const passwordInput = document.querySelector("#password");
+const togglePassword = document.querySelector("#togglePassword");
+
 let selectedRole = null;
 let previousFocus = null;
+
+/* ========================================
+   OPEN THE ROLE-SPECIFIC LOGIN PANEL
+======================================== */
 
 function openLogin(role, selectedCard) {
     selectedRole = role;
     previousFocus = selectedCard;
 
-    // Update the login text for the selected role.
+    // Reset the password visibility whenever the panel opens.
+    passwordInput.type = "password";
+    togglePassword.textContent = "Show";
+    togglePassword.setAttribute("aria-label", "Show password");
+    togglePassword.setAttribute("aria-pressed", "false");
+
+    loginForm.reset();
+    formMessage.textContent = "";
+
     if (role === "student") {
         loginTitle.textContent = "Welcome, learner.";
         loginSubtitle.textContent =
@@ -34,7 +49,7 @@ function openLogin(role, selectedCard) {
         loginSymbol.textContent = "✦";
     }
 
-    // Highlight the selected card and dim the other one.
+    // Highlight the selected card and dim the other card.
     roleCards.forEach((card) => {
         const isSelected = card === selectedCard;
 
@@ -44,13 +59,12 @@ function openLogin(role, selectedCard) {
         card.setAttribute("aria-pressed", String(isSelected));
     });
 
-    // Show the blur and login panel.
+    // Display the backdrop and login panel.
     backdrop.hidden = false;
     loginPanel.hidden = false;
 
     document.body.style.overflow = "hidden";
 
-    // Allow the browser to apply the initial styles before animating.
     requestAnimationFrame(() => {
         backdrop.classList.add("is-visible");
         loginPanel.classList.add("is-visible");
@@ -58,7 +72,15 @@ function openLogin(role, selectedCard) {
     });
 }
 
+/* ========================================
+   CLOSE THE LOGIN PANEL
+======================================== */
+
 function closeLogin() {
+    if (!selectedRole) {
+        return;
+    }
+
     backdrop.classList.remove("is-visible");
     loginPanel.classList.remove("is-visible");
 
@@ -69,7 +91,6 @@ function closeLogin() {
 
     document.body.style.overflow = "";
 
-    // Wait for the exit animation before hiding the elements.
     window.setTimeout(() => {
         backdrop.hidden = true;
         loginPanel.hidden = true;
@@ -83,7 +104,10 @@ function closeLogin() {
     }, 320);
 }
 
-// Open the correct login panel when a role card is clicked.
+/* ========================================
+   ROLE CARD CLICK EVENTS
+======================================== */
+
 roleCards.forEach((card) => {
     card.setAttribute("aria-pressed", "false");
 
@@ -96,20 +120,54 @@ roleCards.forEach((card) => {
     });
 });
 
-// Close the panel with the close button or by clicking outside.
+/* ========================================
+   CLOSE BUTTON AND BACKDROP EVENTS
+======================================== */
+
 closeButton.addEventListener("click", closeLogin);
 backdrop.addEventListener("click", closeLogin);
 
-// Allow Escape to close the panel.
 document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && selectedRole) {
         closeLogin();
     }
 });
 
-// This is a frontend demo only. No credentials are sent anywhere.
+/* ========================================
+   SHOW / HIDE PASSWORD
+======================================== */
+
+togglePassword.addEventListener("click", () => {
+    const isPasswordHidden = passwordInput.type === "password";
+
+    // Change the input type to reveal or mask the password.
+    passwordInput.type = isPasswordHidden ? "text" : "password";
+
+    // Update the button text.
+    togglePassword.textContent = isPasswordHidden ? "Hide" : "Show";
+
+    // Update accessibility information.
+    togglePassword.setAttribute(
+        "aria-label",
+        isPasswordHidden ? "Hide password" : "Show password"
+    );
+
+    togglePassword.setAttribute(
+        "aria-pressed",
+        String(isPasswordHidden)
+    );
+});
+
+/* ========================================
+   DEMO FORM SUBMISSION
+======================================== */
+
 loginForm.addEventListener("submit", (event) => {
     event.preventDefault();
+
+    if (!selectedRole) {
+        return;
+    }
 
     formMessage.textContent =
         `The ${selectedRole} login interface is working! ` +

@@ -451,6 +451,10 @@ a:focus-visible {
     line-height: 1.7;
 }
 
+/* ========================================
+   10. FORM FIELDS
+======================================== */
+
 #loginForm {
     display: flex;
     flex-direction: column;
@@ -478,6 +482,50 @@ a:focus-visible {
 #loginForm input::placeholder {
     color: #8A8C83;
 }
+
+/* ========================================
+   11. PASSWORD VISIBILITY TOGGLE
+======================================== */
+
+.password-wrapper {
+    position: relative;
+    width: 100%;
+    margin-bottom: 17px;
+}
+
+.password-wrapper input {
+    margin-bottom: 0 !important;
+    padding-right: 65px !important;
+}
+
+.password-toggle {
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    padding: 6px 2px;
+    border: none;
+    background: transparent;
+    color: var(--olive);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.password-toggle:hover {
+    color: var(--charcoal);
+    text-decoration: underline;
+}
+
+.password-toggle:focus-visible {
+    outline: 2px solid var(--olive);
+    outline-offset: 2px;
+    border-radius: 3px;
+}
+
+/* ========================================
+   12. SUBMIT BUTTON AND MESSAGES
+======================================== */
 
 .submit-button {
     display: flex;
@@ -514,7 +562,7 @@ a:focus-visible {
 }
 
 /* ========================================
-   10. MOBILE RESPONSIVENESS
+   13. MOBILE RESPONSIVENESS
 ======================================== */
 
 @media (max-width: 640px) {
@@ -573,6 +621,7 @@ a:focus-visible {
     }
 }
 
+/* Respect reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
