@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f7f8f4">
+    <title>LearnSpace | Your Courses</title>
+    <link rel="stylesheet" href="student_courses.css">
+    <script src="student_courses.js" defer></script>
+</head>
+<body>
+    <main class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="index.html" aria-label="LearnSpace home">
+                <span class="brand-icon">L</span>
+                <span><span class="brand-name">learnspace</span><span class="brand-tagline">A place to grow</span></span>
+            </a>
+            <div class="header-right"><span class="header-note">Your learning journey starts here.</span><button class="profile-mark" type="button" aria-label="Student profile">S</button></div>
+        </header>
+
+        <section class="welcome-section" aria-labelledby="pageTitle">
+            <p class="eyebrow">YOUR LEARNING SPACE</p>
+            <h1 id="pageTitle">A little space for<br><span>big ideas.</span></h1>
+            <p class="welcome-description">Pick up where curiosity takes you. Choose a course to explore, learn, and grow.</p>
+        </section>
+
+        <section class="courses-section" aria-labelledby="coursesHeading">
+            <div class="section-heading"><div><p class="eyebrow">LEARN AT YOUR PACE</p><h2 id="coursesHeading">Your courses</h2></div><span class="course-count" id="courseCount">8 courses</span></div>
+            <div class="course-grid" id="courseGrid" aria-live="polite"></div>
+        </section>
+
+        <footer class="site-footer"><span>LEARN SOMETHING NEW, EVERY DAY.</span><span>MADE FOR CURIOUS MINDS ✳</span></footer>
+    </main>
+
+    <dialog class="course-dialog" id="courseDialog" aria-labelledby="dialogTitle">
+        <button class="close-button" id="closeDialog" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">YOUR NEXT CHAPTER</p><h2 id="dialogTitle">Add a course</h2>
+        <form id="courseForm">
+            <label for="courseTitle">Course title <span aria-hidden="true">*</span></label><input id="courseTitle" name="title" required maxlength="70" placeholder="e.g. Foundations of Design">
+            <label for="courseDescription">Short description <span aria-hidden="true">*</span></label><textarea id="courseDescription" name="description" required maxlength="180" rows="3" placeholder="What will students explore?"></textarea>
+            <label for="instructorName">Instructor name <span class="optional">(optional)</span></label><input id="instructorName" name="instructor" maxlength="60" placeholder="Instructor">
+            <label for="coverImage">Course cover <span class="optional">(optional)</span></label><input id="coverImage" name="cover" type="file" accept="image/*"><span class="field-hint" id="coverFilename">Choose an image file</span>
+            <div class="resources-heading"><div><h3>Learning materials</h3><p>Add books, notes, presentations, or assignments.</p></div><button class="quiet-button" id="addResource" type="button">+ Add material</button></div>
+            <div class="resource-list" id="resourceList"></div>
+            <p class="form-message" id="formMessage" role="status" aria-live="polite"></p>
+            <div class="dialog-actions"><button class="secondary-button" id="cancelDialog" type="button">Cancel</button><button class="primary-button" type="submit">Save course <span aria-hidden="true">→</span></button></div>
+        </form>
+    </dialog>
+
+    <dialog class="course-dialog detail-dialog" id="detailDialog" aria-labelledby="detailTitle">
+        <button class="close-button" id="closeDetail" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">COURSE PREVIEW</p><h2 id="detailTitle"></h2><p class="detail-description" id="detailDescription"></p><p class="instructor-line" id="detailInstructor"></p>
+        <section class="detail-resources"><h3>Learning materials</h3><div id="detailResourceList"></div></section>
+        <button class="primary-button detail-close" id="doneDetail" type="button">Done</button>
+    </dialog>
+</body>
+</html>
