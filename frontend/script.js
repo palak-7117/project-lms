@@ -169,6 +169,11 @@ loginForm.addEventListener("submit", (event) => {
         return;
     }
 
+    if (selectedRole === "student"){
+        window.location.href = "student_courses.html";
+        return;
+    }
+
     formMessage.textContent =
         `The ${selectedRole} login interface is working! ` +
         "Real authentication will be connected to our backend later.";
