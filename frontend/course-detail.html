@@ -1,0 +1,92 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Course Workspace | LearnSpace</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="course-detail.js" defer></script>
+</head>
+<body class="course-detail-page">
+
+    <header class="dashboard-header">
+        <a href="teacher-dashboard.html" class="brand">
+            <div class="brand-icon">L</div>
+            <div>
+                <h2>learnspace</h2>
+                <p>A place to grow</p>
+            </div>
+        </a>
+
+        <div class="teacher-profile">
+            <span>Your teaching space</span>
+            <div class="profile-icon">T</div>
+        </div>
+    </header>
+
+    <main class="course-detail-main">
+        <a href="teacher-dashboard.html" class="course-back-link">
+            <span aria-hidden="true">←</span>
+            Back to courses
+        </a>
+
+        <section class="course-hero">
+            <div class="course-hero-symbol" aria-hidden="true">✳</div>
+
+            <div class="course-hero-content">
+                <p class="eyebrow">YOUR CLASSROOM</p>
+                <h1 id="courseTitle">Loading course...</h1>
+
+                <div class="course-instructor">
+                    <div class="course-instructor-avatar">T</div>
+                    <div>
+                        <span class="course-meta-label">INSTRUCTOR</span>
+                        <p id="courseInstructor">Instructor</p>
+                    </div>
+                </div>
+            </div>
+
+            <aside class="course-hero-summary">
+                <p class="eyebrow">COURSE AT A GLANCE</p>
+
+                <div class="course-enrollment">
+                    <span class="course-summary-label">STUDENTS ENROLLED</span>
+                    <strong id="studentCount">0</strong>
+                </div>
+
+                <div class="course-overview-description">
+                    <span class="course-summary-label">COURSE OVERVIEW</span>
+                    <p id="courseDescription">Course description</p>
+                </div>
+            </aside>
+        </section>
+
+        <nav class="course-tabs" aria-label="Course sections">
+            <button type="button" class="course-tab active"
+                data-tab="materials" aria-selected="true">
+                Books & Notes
+            </button>
+
+            <button type="button" class="course-tab"
+                data-tab="assignments" aria-selected="false">
+                Assignments
+            </button>
+
+            <button type="button" class="course-tab"
+                data-tab="quizzes" aria-selected="false">
+                Quizzes
+            </button>
+
+            <button type="button" class="course-tab"
+                data-tab="attendance" aria-selected="false">
+                Attendance
+            </button>
+        </nav>
+
+        <section id="courseTabContent" class="course-tab-content"
+            aria-live="polite"></section>
+    </main>
+
+</body>
+</html>
