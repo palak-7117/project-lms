@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LearnSpace | Teacher Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <script src="teacher-dashboard.js" defer></script>
 </head>
 
 <body>
@@ -37,13 +38,14 @@
         </section>
 
         <section class="courses-section">
+
             <div class="section-heading">
                 <div>
                     <p class="eyebrow">YOUR CLASSROOMS</p>
                     <h2>Courses you teach</h2>
                 </div>
 
-                <span class="course-count">8 courses</span>
+                <span class="course-count" id="courseCount">8 courses</span>
             </div>
 
             <div class="course-grid" id="courseGrid">
@@ -152,7 +154,11 @@
                     </div>
                 </article>
 
-                <button type="button" class="add-course-card" id="addCourseBtn">
+                <button
+                    type="button"
+                    class="add-course-card"
+                    id="addCourseBtn"
+                >
                     <span class="add-course-symbol">+</span>
                     <span>Add a course</span>
                     <small>Create a new classroom</small>
@@ -162,6 +168,63 @@
         </section>
 
     </main>
+
+    <!-- Add Course Dialog -->
+    <div class="course-modal-backdrop" id="courseModalBackdrop" hidden>
+        <section
+            class="course-modal"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="courseModalTitle"
+        >
+            <button
+                type="button"
+                class="course-modal-close"
+                id="closeCourseModal"
+                aria-label="Close form"
+            >&times;</button>
+
+            <p class="eyebrow">A NEW CLASSROOM</p>
+            <h2 id="courseModalTitle">Create a course.</h2>
+            <p class="course-modal-intro">
+                Give your next learning space a name and a purpose.
+            </p>
+
+            <form id="addCourseForm">
+                <label for="newCourseName">Course name</label>
+                <input
+                    type="text"
+                    id="newCourseName"
+                    name="courseName"
+                    placeholder="e.g. Introduction to C++"
+                    maxlength="80"
+                    required
+                >
+
+                <label for="newCourseDescription">Course description</label>
+                <textarea
+                    id="newCourseDescription"
+                    name="courseDescription"
+                    placeholder="What will your students learn?"
+                    rows="3"
+                    maxlength="240"
+                    required
+                ></textarea>
+
+                <p class="course-form-message" id="courseFormMessage" aria-live="polite"></p>
+
+                <div class="course-form-actions">
+                    <button type="button" class="cancel-course-btn" id="cancelCourseBtn">
+                        Cancel
+                    </button>
+
+                    <button type="submit" class="save-course-btn">
+                        Create course
+                    </button>
+                </div>
+            </form>
+        </section>
+    </div>
 
 </body>
 </html>
