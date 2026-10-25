@@ -4,13 +4,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
     <title>LearnSpace | Teacher Dashboard</title>
+
     <link rel="stylesheet" href="style.css">
     <script src="teacher-dashboard.js" defer></script>
 </head>
 
 <body>
 
+    <!-- Header -->
     <header class="dashboard-header">
         <div class="brand">
             <div class="brand-icon">L</div>
@@ -26,6 +29,7 @@
         </div>
     </header>
 
+    <!-- Main Dashboard -->
     <main class="teacher-dashboard">
 
         <section class="dashboard-intro">
@@ -37,6 +41,7 @@
             </p>
         </section>
 
+        <!-- Courses Section -->
         <section class="courses-section">
 
             <div class="section-heading">
@@ -154,6 +159,7 @@
                     </div>
                 </article>
 
+                <!-- Add Course Button -->
                 <button
                     type="button"
                     class="add-course-card"
@@ -166,11 +172,11 @@
 
             </div>
         </section>
-
     </main>
 
-    <!-- Add Course Dialog -->
+    <!-- Add Course Modal -->
     <div class="course-modal-backdrop" id="courseModalBackdrop" hidden>
+
         <section
             class="course-modal"
             role="dialog"
@@ -186,17 +192,29 @@
 
             <p class="eyebrow">A NEW CLASSROOM</p>
             <h2 id="courseModalTitle">Create a course.</h2>
+
             <p class="course-modal-intro">
                 Give your next learning space a name and a purpose.
             </p>
 
             <form id="addCourseForm">
+
                 <label for="newCourseName">Course name</label>
                 <input
                     type="text"
                     id="newCourseName"
                     name="courseName"
                     placeholder="e.g. Introduction to C++"
+                    maxlength="80"
+                    required
+                >
+
+                <label for="newInstructorName">Instructor name</label>
+                <input
+                    type="text"
+                    id="newInstructorName"
+                    name="instructorName"
+                    placeholder="e.g. Palak Panwar"
                     maxlength="80"
                     required
                 >
@@ -211,10 +229,18 @@
                     required
                 ></textarea>
 
-                <p class="course-form-message" id="courseFormMessage" aria-live="polite"></p>
+                <p
+                    class="course-form-message"
+                    id="courseFormMessage"
+                    aria-live="polite"
+                ></p>
 
                 <div class="course-form-actions">
-                    <button type="button" class="cancel-course-btn" id="cancelCourseBtn">
+                    <button
+                        type="button"
+                        class="cancel-course-btn"
+                        id="cancelCourseBtn"
+                    >
                         Cancel
                     </button>
 
@@ -222,6 +248,7 @@
                         Create course
                     </button>
                 </div>
+
             </form>
         </section>
     </div>

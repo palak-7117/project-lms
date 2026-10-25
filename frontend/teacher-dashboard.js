@@ -9,11 +9,16 @@ const cancelCourseBtn = document.querySelector("#cancelCourseBtn");
 
 const addCourseForm = document.querySelector("#addCourseForm");
 const newCourseName = document.querySelector("#newCourseName");
+const newInstructorName = document.querySelector("#newInstructorName");
 const newCourseDescription = document.querySelector("#newCourseDescription");
 const courseFormMessage = document.querySelector("#courseFormMessage");
 
+// Holds courses created during the current page session.
+// The instructor is stored as data but is not shown on the card.
+const createdCourses = [];
+
 /* ========================================
-   UPDATE THE COURSE COUNT
+   UPDATE COURSE COUNT
 ======================================== */
 
 function updateCourseCount() {
@@ -26,19 +31,19 @@ function updateCourseCount() {
 }
 
 /* ========================================
-   OPEN THE ADD COURSE FORM
+   OPEN ADD COURSE FORM
 ======================================== */
 
 function openCourseModal() {
-    courseFormMessage.textContent = "";
     addCourseForm.reset();
+    courseFormMessage.textContent = "";
 
     courseModalBackdrop.hidden = false;
     newCourseName.focus();
 }
 
 /* ========================================
-   CLOSE THE ADD COURSE FORM
+   CLOSE ADD COURSE FORM
 ======================================== */
 
 function closeCourseForm() {
@@ -55,7 +60,7 @@ closeCourseModal.addEventListener("click", closeCourseForm);
 cancelCourseBtn.addEventListener("click", closeCourseForm);
 
 /* ========================================
-   CLOSE WHEN CLICKING OUTSIDE THE FORM
+   CLOSE WHEN CLICKING OUTSIDE
 ======================================== */
 
 courseModalBackdrop.addEventListener("click", (event) => {
@@ -65,23 +70,21 @@ courseModalBackdrop.addEventListener("click", (event) => {
 });
 
 /* ========================================
-   CLOSE FORM WITH ESCAPE
+   CLOSE WITH ESCAPE
 ======================================== */
 
 document.addEventListener("keydown", (event) => {
-    if (
-        event.key === "Escape" &&
-        !courseModalBackdrop.hidden
-    ) {
+    if (event.key === "Escape" && !courseModalBackdrop.hidden) {
         closeCourseForm();
     }
 });
 
 /* ========================================
    CREATE A COURSE CARD
+   Instructor is intentionally not displayed.
 ======================================== */
 
-function createCourseCard(name, description, number) {
+function createCourseCard(course, number) {
     const card = document.createElement("article");
     card.className = "teacher-course-card";
 
@@ -94,11 +97,11 @@ function createCourseCard(name, description, number) {
     symbol.textContent = "✳";
 
     const title = document.createElement("h3");
-    title.textContent = name;
+    title.textContent = course.name;
 
     const descriptionText = document.createElement("p");
     descriptionText.className = "course-description";
-    descriptionText.textContent = description;
+    descriptionText.textContent = course.description;
 
     const footer = document.createElement("div");
     footer.className = "course-card-footer";
@@ -111,26 +114,45 @@ function createCourseCard(name, description, number) {
     arrow.textContent = "→";
 
     footer.append(manageText, arrow);
-    card.append(label, symbol, title, descriptionText, footer);
+
+    card.append(
+        label,
+        symbol,
+        title,
+        descriptionText,
+        footer
+    );
 
     return card;
 }
 
 /* ========================================
-   SUBMIT THE ADD COURSE FORM
+   SUBMIT ADD COURSE FORM
 ======================================== */
 
 addCourseForm.addEventListener("submit", (event) => {
     event.preventDefault();
 
     const name = newCourseName.value.trim();
+    const instructor = newInstructorName.value.trim();
     const description = newCourseDescription.value.trim();
 
-    if (!name || !description) {
+    if (!name || !instructor || !description) {
         courseFormMessage.textContent =
-            "Please enter both a course name and description.";
+            "Please fill in all three fields.";
         return;
     }
+
+    // Store all course details, including instructor.
+    // The instructor is not rendered on the course card.
+    const course = {
+        id: crypto.randomUUID(),
+        name: name,
+        instructor: instructor,
+        description: description
+    };
+
+    createdCourses.push(course);
 
     const existingCards = courseGrid.querySelectorAll(
         ".teacher-course-card"
@@ -138,21 +160,19 @@ addCourseForm.addEventListener("submit", (event) => {
 
     const nextNumber = existingCards.length + 1;
 
-    const newCard = createCourseCard(
-        name,
-        description,
-        nextNumber
-    );
+    const newCard = createCourseCard(course, nextNumber);
 
-    // Place the new course before the Add Course button.
+    // Insert the new course before the Add Course button.
     courseGrid.insertBefore(newCard, addCourseBtn);
 
     updateCourseCount();
     closeCourseForm();
+
+    console.log("Course created:", course);
 });
 
 /* ========================================
-   INITIALIZE THE DASHBOARD
+   INITIALIZE DASHBOARD
 ======================================== */
 
 updateCourseCount();
