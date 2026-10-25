@@ -13,8 +13,8 @@ const newInstructorName = document.querySelector("#newInstructorName");
 const newCourseDescription = document.querySelector("#newCourseDescription");
 const courseFormMessage = document.querySelector("#courseFormMessage");
 
-// Holds courses created during the current page session.
-// Instructor details are stored but not displayed on course cards.
+// Stores courses created during the current page session.
+// Instructor information is stored but not displayed on course cards.
 const createdCourses = [];
 
 /* ========================================
@@ -31,6 +31,91 @@ function updateCourseCount() {
 }
 
 /* ========================================
+   UPDATE COURSE NUMBERS
+======================================== */
+
+function updateCourseLabels() {
+    const cards = courseGrid.querySelectorAll(".teacher-course-card");
+
+    cards.forEach((card, index) => {
+        const label = card.querySelector(".course-label");
+
+        if (label) {
+            label.textContent =
+                `COURSE ${String(index + 1).padStart(2, "0")}`;
+        }
+    });
+}
+
+/* ========================================
+   REMOVE A COURSE
+======================================== */
+
+function removeCourse(card, courseName, courseId = null) {
+    const confirmed = window.confirm(
+        `Are you sure you want to remove "${courseName}"?`
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    // Remove the course card from the dashboard.
+    card.remove();
+
+    // Remove the course from the in-memory collection, if present.
+    if (courseId !== null) {
+        const courseIndex = createdCourses.findIndex(
+            (course) => course.id === courseId
+        );
+
+        if (courseIndex !== -1) {
+            createdCourses.splice(courseIndex, 1);
+        }
+    }
+
+    // Refresh the course numbers and total count.
+    updateCourseLabels();
+    updateCourseCount();
+}
+
+/* ========================================
+   ADD REMOVE BUTTONS TO COURSE CARDS
+======================================== */
+
+// This also handles the course cards already written in HTML.
+function addRemoveButtonsToExistingCards() {
+    const cards = courseGrid.querySelectorAll(".teacher-course-card");
+
+    cards.forEach((card) => {
+        // Do not add another button if one already exists.
+        if (card.querySelector(".remove-course-btn")) {
+            return;
+        }
+
+        const title = card.querySelector("h3");
+        const courseName = title
+            ? title.textContent.trim()
+            : "this course";
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "remove-course-btn";
+        removeBtn.textContent = "Remove";
+        removeBtn.setAttribute(
+            "aria-label",
+            `Remove ${courseName}`
+        );
+
+        removeBtn.addEventListener("click", () => {
+            removeCourse(card, courseName);
+        });
+
+        card.appendChild(removeBtn);
+    });
+}
+
+/* ========================================
    OPEN ADD COURSE FORM
 ======================================== */
 
@@ -38,14 +123,12 @@ function openCourseModal() {
     addCourseForm.reset();
     courseFormMessage.textContent = "";
 
-    // Show the backdrop in its initial, hidden-animation state.
     courseModalBackdrop.hidden = false;
     courseModalBackdrop.classList.remove("is-visible");
 
-    // Let the browser register the initial state before animating.
+    // Allow the browser to register the initial state.
     void courseModalBackdrop.offsetWidth;
 
-    // Start the opening animation.
     requestAnimationFrame(() => {
         courseModalBackdrop.classList.add("is-visible");
         newCourseName.focus();
@@ -57,15 +140,14 @@ function openCourseModal() {
 ======================================== */
 
 function closeCourseForm() {
-    // Prevent repeated closing actions.
     if (courseModalBackdrop.hidden) {
         return;
     }
 
-    // Remove the class to start the closing animation.
+    // Start the closing animation.
     courseModalBackdrop.classList.remove("is-visible");
 
-    // Hide the backdrop after the CSS transition finishes.
+    // Hide the modal after its transition.
     window.setTimeout(() => {
         courseModalBackdrop.hidden = true;
         courseFormMessage.textContent = "";
@@ -110,7 +192,6 @@ document.addEventListener("keydown", (event) => {
 
 /* ========================================
    CREATE A COURSE CARD
-   Instructor is intentionally not displayed.
 ======================================== */
 
 function createCourseCard(course, number) {
@@ -144,12 +225,28 @@ function createCourseCard(course, number) {
 
     footer.append(manageText, arrow);
 
+    // Create a Remove button for the new card.
+    const removeBtn = document.createElement("button");
+    removeBtn.type = "button";
+    removeBtn.className = "remove-course-btn";
+    removeBtn.textContent = "Remove";
+    removeBtn.setAttribute(
+        "aria-label",
+        `Remove ${course.name}`
+    );
+
+    removeBtn.addEventListener("click", () => {
+        removeCourse(card, course.name, course.id);
+    });
+
+    // Instructor information is intentionally not displayed.
     card.append(
         label,
         symbol,
         title,
         descriptionText,
-        footer
+        footer,
+        removeBtn
     );
 
     return card;
@@ -173,7 +270,6 @@ addCourseForm.addEventListener("submit", (event) => {
     }
 
     // Store the course details, including instructor information.
-    // Instructor information is not rendered on the course card.
     const course = {
         id: crypto.randomUUID(),
         name: name,
@@ -188,10 +284,9 @@ addCourseForm.addEventListener("submit", (event) => {
     );
 
     const nextNumber = existingCards.length + 1;
-
     const newCard = createCourseCard(course, nextNumber);
 
-    // Place the new card before the Add Course button.
+    // Insert the new card before the Add Course button.
     courseGrid.insertBefore(newCard, addCourseBtn);
 
     updateCourseCount();
@@ -204,4 +299,8 @@ addCourseForm.addEventListener("submit", (event) => {
    INITIALIZE DASHBOARD
 ======================================== */
 
+// Add Remove buttons to all eight existing HTML cards.
+addRemoveButtonsToExistingCards();
+
+// Display the correct initial course count.
 updateCourseCount();

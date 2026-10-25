@@ -1330,4 +1330,25 @@ a:focus-visible {
 }
 
 
+/* Remove Course Button */
+
+.remove-course-btn {
+    align-self: flex-start;
+    margin-top: 14px;
+    padding: 7px 12px;
+    border: 1px solid rgba(139, 66, 57, 0.4);
+    border-radius: 6px;
+    background: transparent;
+    color: #8b4239;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: background 200ms ease, color 200ms ease;
+}
+
+.remove-course-btn:hover {
+    background: #8b4239;
+    color: #fff;
+}
+
 
