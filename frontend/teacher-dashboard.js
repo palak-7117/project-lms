@@ -13,26 +13,57 @@ const newInstructorName = document.querySelector("#newInstructorName");
 const newCourseDescription = document.querySelector("#newCourseDescription");
 const courseFormMessage = document.querySelector("#courseFormMessage");
 
-// Stores courses created during the current page session.
-// Instructor information is stored but not displayed on course cards.
-const createdCourses = [];
+const STORAGE_KEY = "learnspaceCourses";
 
-/* ========================================
-   UPDATE COURSE COUNT
-======================================== */
+// Read the eight sample courses from the HTML.
+function getInitialCoursesFromHTML() {
+    const cards = courseGrid.querySelectorAll(".teacher-course-card");
+
+    return Array.from(cards).map((card) => ({
+        id: crypto.randomUUID(),
+        name: card.querySelector("h3").textContent.trim(),
+        instructor: "Not specified",
+        description: card.querySelector(".course-description").textContent.trim()
+    }));
+}
+
+// Load courses from localStorage.
+// If this is the first visit, save the sample HTML courses.
+function loadCourses() {
+    const savedCourses = localStorage.getItem(STORAGE_KEY);
+
+    if (savedCourses !== null) {
+        try {
+            const parsedCourses = JSON.parse(savedCourses);
+
+            if (Array.isArray(parsedCourses)) {
+                return parsedCourses;
+            }
+        } catch (error) {
+            console.error("Could not read saved courses:", error);
+        }
+    }
+
+    const initialCourses = getInitialCoursesFromHTML();
+    saveCourses(initialCourses);
+
+    return initialCourses;
+}
+
+// Save the complete course list.
+function saveCourses(courses) {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(courses));
+}
+
+// Our main course data now comes from localStorage.
+let courses = loadCourses();
 
 function updateCourseCount() {
-    const totalCourses = courseGrid.querySelectorAll(
-        ".teacher-course-card"
-    ).length;
+    const totalCourses = courses.length;
 
     courseCount.textContent =
         `${totalCourses} ${totalCourses === 1 ? "course" : "courses"}`;
 }
-
-/* ========================================
-   UPDATE COURSE NUMBERS
-======================================== */
 
 function updateCourseLabels() {
     const cards = courseGrid.querySelectorAll(".teacher-course-card");
@@ -47,77 +78,37 @@ function updateCourseLabels() {
     });
 }
 
-/* ========================================
-   REMOVE A COURSE
-======================================== */
+function renderCourses() {
+    // Remove old course cards but keep the Add Course button.
+    courseGrid.querySelectorAll(".teacher-course-card").forEach((card) => {
+        card.remove();
+    });
 
-function removeCourse(card, courseName, courseId = null) {
-    const confirmed = window.confirm(
-        `Are you sure you want to remove "${courseName}"?`
-    );
+    courses.forEach((course, index) => {
+        const card = createCourseCard(course, index + 1);
+        courseGrid.insertBefore(card, addCourseBtn);
+    });
 
-    if (!confirmed) {
-        return;
-    }
-
-    // Remove the course card from the dashboard.
-    card.remove();
-
-    // Remove the course from the in-memory collection, if present.
-    if (courseId !== null) {
-        const courseIndex = createdCourses.findIndex(
-            (course) => course.id === courseId
-        );
-
-        if (courseIndex !== -1) {
-            createdCourses.splice(courseIndex, 1);
-        }
-    }
-
-    // Refresh the course numbers and total count.
     updateCourseLabels();
     updateCourseCount();
 }
 
-/* ========================================
-   ADD REMOVE BUTTONS TO COURSE CARDS
-======================================== */
+function removeCourse(courseId) {
+    const course = courses.find((item) => item.id === courseId);
 
-// This also handles the course cards already written in HTML.
-function addRemoveButtonsToExistingCards() {
-    const cards = courseGrid.querySelectorAll(".teacher-course-card");
+    if (!course) return;
 
-    cards.forEach((card) => {
-        // Do not add another button if one already exists.
-        if (card.querySelector(".remove-course-btn")) {
-            return;
-        }
+    const confirmed = window.confirm(
+        `Are you sure you want to remove "${course.name}"?`
+    );
 
-        const title = card.querySelector("h3");
-        const courseName = title
-            ? title.textContent.trim()
-            : "this course";
+    if (!confirmed) return;
 
-        const removeBtn = document.createElement("button");
-        removeBtn.type = "button";
-        removeBtn.className = "remove-course-btn";
-        removeBtn.textContent = "Remove";
-        removeBtn.setAttribute(
-            "aria-label",
-            `Remove ${courseName}`
-        );
+    courses = courses.filter((item) => item.id !== courseId);
 
-        removeBtn.addEventListener("click", () => {
-            removeCourse(card, courseName);
-        });
-
-        card.appendChild(removeBtn);
-    });
+    saveCourses(courses);
+    renderCourses();
 }
-
-/* ========================================
-   OPEN ADD COURSE FORM
-======================================== */
 
 function openCourseModal() {
     addCourseForm.reset();
@@ -126,7 +117,6 @@ function openCourseModal() {
     courseModalBackdrop.hidden = false;
     courseModalBackdrop.classList.remove("is-visible");
 
-    // Allow the browser to register the initial state.
     void courseModalBackdrop.offsetWidth;
 
     requestAnimationFrame(() => {
@@ -135,50 +125,28 @@ function openCourseModal() {
     });
 }
 
-/* ========================================
-   CLOSE ADD COURSE FORM
-======================================== */
-
 function closeCourseForm() {
-    if (courseModalBackdrop.hidden) {
-        return;
-    }
+    if (courseModalBackdrop.hidden) return;
 
-    // Start the closing animation.
     courseModalBackdrop.classList.remove("is-visible");
 
-    // Hide the modal after its transition.
     window.setTimeout(() => {
         courseModalBackdrop.hidden = true;
         courseFormMessage.textContent = "";
         addCourseForm.reset();
-
         addCourseBtn.focus();
     }, 450);
 }
 
-/* ========================================
-   MODAL BUTTON EVENTS
-======================================== */
-
 addCourseBtn.addEventListener("click", openCourseModal);
-
 closeCourseModal.addEventListener("click", closeCourseForm);
 cancelCourseBtn.addEventListener("click", closeCourseForm);
-
-/* ========================================
-   CLOSE WHEN CLICKING OUTSIDE
-======================================== */
 
 courseModalBackdrop.addEventListener("click", (event) => {
     if (event.target === courseModalBackdrop) {
         closeCourseForm();
     }
 });
-
-/* ========================================
-   CLOSE WITH ESCAPE
-======================================== */
 
 document.addEventListener("keydown", (event) => {
     if (
@@ -189,10 +157,6 @@ document.addEventListener("keydown", (event) => {
         closeCourseForm();
     }
 });
-
-/* ========================================
-   CREATE A COURSE CARD
-======================================== */
 
 function createCourseCard(course, number) {
     const card = document.createElement("article");
@@ -225,21 +189,16 @@ function createCourseCard(course, number) {
 
     footer.append(manageText, arrow);
 
-    // Create a Remove button for the new card.
     const removeBtn = document.createElement("button");
     removeBtn.type = "button";
     removeBtn.className = "remove-course-btn";
     removeBtn.textContent = "Remove";
-    removeBtn.setAttribute(
-        "aria-label",
-        `Remove ${course.name}`
-    );
+    removeBtn.setAttribute("aria-label", `Remove ${course.name}`);
 
     removeBtn.addEventListener("click", () => {
-        removeCourse(card, course.name, course.id);
+        removeCourse(course.id);
     });
 
-    // Instructor information is intentionally not displayed.
     card.append(
         label,
         symbol,
@@ -251,10 +210,6 @@ function createCourseCard(course, number) {
 
     return card;
 }
-
-/* ========================================
-   SUBMIT ADD COURSE FORM
-======================================== */
 
 addCourseForm.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -269,7 +224,6 @@ addCourseForm.addEventListener("submit", (event) => {
         return;
     }
 
-    // Store the course details, including instructor information.
     const course = {
         id: crypto.randomUUID(),
         name: name,
@@ -277,30 +231,15 @@ addCourseForm.addEventListener("submit", (event) => {
         description: description
     };
 
-    createdCourses.push(course);
+    courses.push(course);
 
-    const existingCards = courseGrid.querySelectorAll(
-        ".teacher-course-card"
-    );
-
-    const nextNumber = existingCards.length + 1;
-    const newCard = createCourseCard(course, nextNumber);
-
-    // Insert the new card before the Add Course button.
-    courseGrid.insertBefore(newCard, addCourseBtn);
-
-    updateCourseCount();
+    saveCourses(courses);
+    renderCourses();
     closeCourseForm();
 
     console.log("Course created:", course);
+    console.log("Saved courses:", localStorage.getItem(STORAGE_KEY));
 });
 
-/* ========================================
-   INITIALIZE DASHBOARD
-======================================== */
-
-// Add Remove buttons to all eight existing HTML cards.
-addRemoveButtonsToExistingCards();
-
-// Display the correct initial course count.
-updateCourseCount();
+// Display the saved courses when the page opens.
+renderCourses();
