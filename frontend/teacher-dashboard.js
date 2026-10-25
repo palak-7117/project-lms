@@ -14,7 +14,7 @@ const newCourseDescription = document.querySelector("#newCourseDescription");
 const courseFormMessage = document.querySelector("#courseFormMessage");
 
 // Holds courses created during the current page session.
-// The instructor is stored as data but is not shown on the card.
+// Instructor details are stored but not displayed on course cards.
 const createdCourses = [];
 
 /* ========================================
@@ -38,8 +38,18 @@ function openCourseModal() {
     addCourseForm.reset();
     courseFormMessage.textContent = "";
 
+    // Show the backdrop in its initial, hidden-animation state.
     courseModalBackdrop.hidden = false;
-    newCourseName.focus();
+    courseModalBackdrop.classList.remove("is-visible");
+
+    // Let the browser register the initial state before animating.
+    void courseModalBackdrop.offsetWidth;
+
+    // Start the opening animation.
+    requestAnimationFrame(() => {
+        courseModalBackdrop.classList.add("is-visible");
+        newCourseName.focus();
+    });
 }
 
 /* ========================================
@@ -47,12 +57,27 @@ function openCourseModal() {
 ======================================== */
 
 function closeCourseForm() {
-    courseModalBackdrop.hidden = true;
-    courseFormMessage.textContent = "";
-    addCourseForm.reset();
+    // Prevent repeated closing actions.
+    if (courseModalBackdrop.hidden) {
+        return;
+    }
 
-    addCourseBtn.focus();
+    // Remove the class to start the closing animation.
+    courseModalBackdrop.classList.remove("is-visible");
+
+    // Hide the backdrop after the CSS transition finishes.
+    window.setTimeout(() => {
+        courseModalBackdrop.hidden = true;
+        courseFormMessage.textContent = "";
+        addCourseForm.reset();
+
+        addCourseBtn.focus();
+    }, 450);
 }
+
+/* ========================================
+   MODAL BUTTON EVENTS
+======================================== */
 
 addCourseBtn.addEventListener("click", openCourseModal);
 
@@ -74,7 +99,11 @@ courseModalBackdrop.addEventListener("click", (event) => {
 ======================================== */
 
 document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && !courseModalBackdrop.hidden) {
+    if (
+        event.key === "Escape" &&
+        !courseModalBackdrop.hidden &&
+        courseModalBackdrop.classList.contains("is-visible")
+    ) {
         closeCourseForm();
     }
 });
@@ -143,8 +172,8 @@ addCourseForm.addEventListener("submit", (event) => {
         return;
     }
 
-    // Store all course details, including instructor.
-    // The instructor is not rendered on the course card.
+    // Store the course details, including instructor information.
+    // Instructor information is not rendered on the course card.
     const course = {
         id: crypto.randomUUID(),
         name: name,
@@ -162,7 +191,7 @@ addCourseForm.addEventListener("submit", (event) => {
 
     const newCard = createCourseCard(course, nextNumber);
 
-    // Insert the new course before the Add Course button.
+    // Place the new card before the Add Course button.
     courseGrid.insertBefore(newCard, addCourseBtn);
 
     updateCourseCount();
