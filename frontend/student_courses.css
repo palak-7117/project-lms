@@ -293,7 +293,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
     display: none
 }
 
-.add-course-card {
+/* .add-course-card {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -324,7 +324,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
     border-radius: 50%;
     background: rgba(164,185,154,.22);
     font-size: 27px
-}
+} */
 
 .add-course-card strong {
     font: 400 20px Georgia,serif
@@ -348,7 +348,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
     letter-spacing: 1.2px
 }
 
-.course-dialog {
+/* .course-dialog {
     position: fixed;
     width: min(550px,calc(100vw - 28px));
     max-height: min(90vh,850px);
@@ -632,7 +632,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
 .detail-close {
     display: block;
     margin: 19px 0 0 auto
-}
+} */
 
 @media(max-width:900px) {
     .course-grid {
@@ -664,11 +664,11 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
         grid-template-columns: repeat(2,minmax(0,1fr));
         gap: 11px
     }
-    .course-card,.add-course-card {
+    .course-card {
         min-height: 208px;
         padding: 14px
     }
-    .course-card h3,.add-course-card strong {
+    .course-card h3 {
         font-size: 17px
     }
     .course-card p {
@@ -682,7 +682,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
         align-items: center;
         text-align: center
     }
-    .course-dialog {
+    /* .course-dialog {
         padding: 25px 19px
     }
     .resource-row {
@@ -690,17 +690,17 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
     }
     .resource-file {
         grid-column: 1 / 3
-    }
+    } */
 }
 
 @media(max-width:380px) {
     .course-grid {
         grid-template-columns: 1fr
     }
-    .course-card,.add-course-card {
+    .course-card{
         min-height: 190px
     }
-    .resource-row {
+    /* .resource-row {
         grid-template-columns: minmax(0,1fr) auto
     }
     .resource-row>div:nth-child(2) {
@@ -711,8 +711,8 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
     }
     .remove-resource {
         grid-column: 2;
-        grid-row: 1
-    }
+        grid-row: 1 */
+    /* } */
 }
 
 @media(prefers-reduced-motion:reduce) {

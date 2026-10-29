@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#f7f8f5">
+    <title>LearnSpace | Course Details</title>
+    <link rel="stylesheet" href="course_details.css">
+    <script src="course_data.js" defer></script>
+    <script src="course_details.js" defer></script>
+</head>
+<body>
+    <main class="page-shell">
+        <header class="site-header">
+            <a class="brand" href="student_courses.html" aria-label="LearnSpace home">
+                <span class="brand-icon">L</span>
+                <span class="brand-copy"><span class="brand-name">learnspace</span><span class="brand-tagline">A place to grow</span></span>
+            </a>
+            <!-- <nav class="site-nav" aria-label="Main navigation">
+                <a href="student_courses.html">Courses</a><a href="#books">Resources</a><a href="#assignments">Assignments</a><a href="#quizzes">Quizzes</a>
+            </nav> -->
+            <span class="student-avatar" aria-label="Demonstration student">JD</span>
+        </header>
+
+        <a class="back-link" href="student_courses.html"><span aria-hidden="true">←</span> Back to Courses</a>
+
+        <div class="page-message" id="pageMessage" role="status" hidden></div>
+        <div id="courseContent" hidden>
+            <section class="overview-attendance paper-panel" aria-labelledby="courseTitle">
+                <div class="overview-main">
+                    <div class="course-cover" id="courseCover" aria-hidden="true"><span id="courseIcon">✳</span></div>
+                    <div class="course-heading">
+                        <p class="eyebrow">COURSE OVERVIEW</p>
+                        <h1 id="courseTitle"></h1>
+                        <div class="instructor-block">
+                            <img class="instructor-photo" id="instructorPhoto" alt="" hidden>
+                            <span class="instructor-initials" id="instructorInitials" aria-hidden="true"></span>
+                            <span><span class="instructor-label">INSTRUCTOR</span><span class="instructor-name" id="instructorName"></span></span>
+                        </div>
+                    </div>
+                </div>
+                <section class="attendance-summary" aria-labelledby="attendanceTitle">
+                    <div class="attendance-copy">
+                        <p class="eyebrow" id="attendanceTitle">ATTENDANCE</p>
+                        <p class="attendance-total"><strong id="attendedCount">0</strong> of <strong id="classCount">0</strong><br>classes attended</p>
+                        <p class="attendance-detail" id="attendanceDetail"></p>
+                        <p class="attendance-threshold" id="attendanceThreshold"></p>
+                    </div>
+                    <div class="attendance-ring" id="attendanceRing" role="img" aria-label="Attendance 0 percent">
+                        <svg viewBox="0 0 120 120" aria-hidden="true">
+                            <circle class="ring-track" cx="60" cy="60" r="49"></circle>
+                            <circle class="ring-value" id="ringValue" cx="60" cy="60" r="49"></circle>
+                        </svg>
+                        <span class="ring-label" id="attendancePercent">0%</span>
+                    </div>
+                </section>
+            </section>
+            <nav class="course-tabs" aria-label="Course sections" role="tablist">
+                <button class="course-tab is-active" type="button"
+                        role="tab" aria-selected="true" data-panel="books">
+                    Materials
+                </button>
+                <button class="course-tab" type="button"
+                        role="tab" aria-selected="false" data-panel="assignments">
+                    Assignments
+                </button>
+                <button class="course-tab" type="button"
+                        role="tab" aria-selected="false" data-panel="quizzes">
+                    Quizzes
+                </button>
+            </nav>
+
+            <section class="content-section" id="books" aria-labelledby="booksTitle" data-course-panel="books">
+                <div class="section-heading"><div><p class="eyebrow">YOUR STUDY MATERIAL</p><h2 id="booksTitle">Books &amp; Notes</h2></div><span class="section-note">Provided for this course</span></div>
+                <div class="horizontal-card-list" id="resourceList"></div>
+            </section>
+
+            <section class="content-section" id="assignments" aria-labelledby="assignmentsTitle" data-course-panel="assignments" hidden>
+                <div class="section-heading"><div><p class="eyebrow">PRACTICE &amp; APPLY</p><h2 id="assignmentsTitle">Assignments</h2></div><span class="section-note">Submission controls are demonstrations</span></div>
+                <div class="horizontal-card-list" id="assignmentList"></div>
+            </section>
+
+            <section class="content-section" id="quizzes" aria-labelledby="quizzesTitle" data-course-panel="quizzes" hidden>
+                <div class="section-heading"><div><p class="eyebrow">CHECK YOUR UNDERSTANDING</p><h2 id="quizzesTitle">Quizzes</h2></div><span class="section-note">Quizzes open in Google Forms</span></div>
+                <div class="quiz-list" id="quizList"></div>
+            </section>
+        </div>
+
+        <footer class="site-footer"><span>LEARN SOMETHING NEW, EVERY DAY.</span><span>DEMONSTRATION COURSE DATA ✳</span></footer>
+    </main>
+
+    <dialog class="detail-dialog" id="assignmentDialog" aria-labelledby="assignmentDialogTitle">
+        <button class="close-button" id="closeAssignment" type="button" aria-label="Close">×</button>
+        <p class="eyebrow">ASSIGNMENT DETAILS</p>
+        <h2 id="assignmentDialogTitle"></h2>
+        <p class="dialog-description" id="assignmentDialogDescription"></p>
+        <div class="assignment-meta" id="assignmentDialogMeta"></div>
+        <section class="reference-files" id="referenceFiles" hidden><h3>Reference files</h3><div id="referenceFileList"></div></section>
+        <div class="demo-submit">
+            <label for="submissionFile">Choose a file (demo only)</label>
+            <input type="file" id="submissionFile" accept=".pdf,.doc,.docx,.ppt,.pptx,.jpg,.jpeg,.png,.zip">
+            <span class="selected-filename" id="selectedFilename">No file selected</span>
+            <button class="primary-button" id="demoSubmit" type="button">Preview demo submission</button>
+            <p class="demo-note" id="submissionMessage">This prototype does not send or permanently save files.</p>
+        </div>
+    </dialog>
+</body>
+</html>
