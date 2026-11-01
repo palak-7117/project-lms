@@ -26,7 +26,7 @@ function openLogin(role, selectedCard) {
     selectedRole = role;
     previousFocus = selectedCard;
 
-    // Reset the password visibility whenever the panel opens.
+    // Reset password visibility whenever the panel opens.
     passwordInput.type = "password";
     togglePassword.textContent = "Show";
     togglePassword.setAttribute("aria-label", "Show password");
@@ -140,7 +140,7 @@ document.addEventListener("keydown", (event) => {
 togglePassword.addEventListener("click", () => {
     const isPasswordHidden = passwordInput.type === "password";
 
-    // Change the input type to reveal or mask the password.
+    // Reveal or mask the password.
     passwordInput.type = isPasswordHidden ? "text" : "password";
 
     // Update the button text.
@@ -159,7 +159,7 @@ togglePassword.addEventListener("click", () => {
 });
 
 /* ========================================
-   DEMO FORM SUBMISSION
+   FORM SUBMISSION
 ======================================== */
 
 loginForm.addEventListener("submit", (event) => {
@@ -174,7 +174,12 @@ loginForm.addEventListener("submit", (event) => {
         return;
     }
 
-    formMessage.textContent =
-        `The ${selectedRole} login interface is working! ` +
-        "Real authentication will be connected to our backend later.";
+
+    // TEACHER: open the teacher dashboard.
+    if (selectedRole === "teacher") {
+        window.location.href = "teacher-dashboard.html";
+        return;
+    }
+
+    // STUDENT: preserve the existing demo behavior.
 });
