@@ -169,6 +169,12 @@ loginForm.addEventListener("submit", (event) => {
         return;
     }
 
+    if (selectedRole === "student"){
+        window.location.href = "student_courses.html";
+        return;
+    }
+
+
     // TEACHER: open the teacher dashboard.
     if (selectedRole === "teacher") {
         window.location.href = "teacher-dashboard.html";
@@ -176,7 +182,4 @@ loginForm.addEventListener("submit", (event) => {
     }
 
     // STUDENT: preserve the existing demo behavior.
-    formMessage.textContent =
-        "The student login interface is working! " +
-        "Real authentication will be connected to our backend later.";
 });
