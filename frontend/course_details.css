@@ -8,7 +8,7 @@
     --sage: #A4C2A5;
     --border: rgba(86, 98, 70, 0.20);
     --attendance-accent: #566246;
-    --blue-track: #E2E5E8; 
+    --blue-track: #E2E5E8;
     --warm-overlay: rgba(232, 226, 210, 0.46);
     --page-width: 1180px;
 }
@@ -650,6 +650,7 @@ input:focus-visible {
     letter-spacing: 1.1px;
 }
 
+/* Assignment submission dialog and file-upload controls. */
 .detail-dialog {
     position: fixed;
     width: min(540px, calc(100vw - 30px));
@@ -753,6 +754,127 @@ input:focus-visible {
 .demo-note {
     margin: 0;
     line-height: 1.5;
+}
+
+/* The selected-file list is populated by course_details.js. */
+.submission-file-list {
+    display: grid;
+    gap: 7px;
+}
+
+.submission-file-list:empty {
+    display: none;
+}
+
+.submission-file-item {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 10px;
+    border: 1px solid rgba(86, 98, 70, 0.18);
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.48);
+}
+
+.submission-file-copy {
+    min-width: 0;
+    display: grid;
+    gap: 3px;
+}
+
+.submission-file-name {
+    color: var(--ink);
+    font-size: 9px;
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.submission-file-size {
+    color: var(--muted-ink);
+    font-size: 8px;
+}
+
+.remove-submission-file {
+    min-height: 27px;
+    padding: 0 9px;
+    border: 1px solid rgba(154, 78, 61, 0.34);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.55);
+    color: #8B453C;
+    font-size: 9px;
+    cursor: pointer;
+}
+
+.remove-submission-file:hover {
+    background: rgba(154, 78, 61, 0.08);
+}
+
+.remove-submission-file:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.submission-status {
+    margin: 0;
+    color: var(--muted-ink);
+    font-size: 9px;
+    line-height: 1.5;
+}
+
+.submission-status:empty {
+    display: none;
+}
+
+.submission-status.is-pending {
+    color: #806326;
+}
+
+.submission-status.is-submitted {
+    color: #47714D;
+}
+
+.submission-status.is-auto-submitted {
+    color: #8B453C;
+}
+
+.submission-status.is-error {
+    color: #9A4E3D;
+}
+
+.submission-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.submission-action-button {
+    width: 100%;
+    min-height: 36px;
+    padding: 7px 10px;
+    font-size: 10px;
+    line-height: 1.35;
+    text-align: center;
+    white-space: normal;
+}
+
+.review-button {
+    border: 1px solid rgba(86, 98, 70, 0.42);
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.38);
+    color: var(--ink);
+    font: 10px Georgia, serif;
+    cursor: pointer;
+}
+
+.review-button:hover {
+    background: rgba(164, 194, 165, 0.24);
+}
+
+.submission-action-button:disabled,
+.review-button:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
 }
 
 @media (max-width: 760px) {
@@ -875,8 +997,16 @@ input:focus-visible {
     }
 
     .course-tabs {
-    justify-content: space-between;
-    gap: 10px;
+        justify-content: space-between;
+        gap: 10px;
+    }
+
+    .submission-actions {
+        grid-template-columns: 1fr;
+    }
+
+    .submission-file-item {
+        align-items: start;
     }
 }
 
