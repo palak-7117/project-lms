@@ -7,7 +7,7 @@ const CONTENT_STORAGE_PREFIX = "learnspaceContent_";
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_SUBMISSION_SIZE = 2 * 1024 * 1024;
 
-// const DEMO_STUDENT_ID = "demo-student";
+const DEMO_STUDENT_ID = "demo-student";
 // const ATTENDANCE_THRESHOLD = 75; // Example only; not an official rule.
 
 const courseId = new URLSearchParams(window.location.search).get("course");
@@ -321,13 +321,13 @@ function getSelectedCourse() {
             },
             // attendance,
 
-            // resources: content.materials.map((item) => ({
-            //     title: item.title || item.fileName || "Untitled material",
-            //     type: normalizeMaterialType(item.type),
-            //     filename: item.fileName || "",
-            //     fileData: item.fileData || "",
-            //     url: item.url || ""
-            // })),
+            resources: content.materials.map((item) => ({
+                title: item.title || item.fileName || "Untitled material",
+                type: normalizeMaterialType(item.type),
+                filename: item.fileName || "",
+                fileData: item.fileData || "",
+                url: item.url || ""
+            })),
 
             assignments: mapTeacherAssignments(
                 content.assignments,

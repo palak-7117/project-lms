@@ -3,6 +3,7 @@
 
 const COURSE_KEY = "learnspaceCourses";
 const CONTENT_PREFIX = "learnspaceContent_";
+const MAX_PDF_SIZE = 2 * 1024 * 1024; // 2 MB
 
 const $ = (selector) => document.querySelector(selector);
 
