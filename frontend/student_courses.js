@@ -1,9 +1,9 @@
 "use strict";
 
 const TEACHER_COURSES_KEY = "learnspaceCourses";
-const sampleCourses = Array.isArray(window.courseCatalog)
-    ? window.courseCatalog
-    : [];
+// const sampleCourses = Array.isArray(window.courseCatalog)
+//     ? window.courseCatalog
+//     : [];
 
 const courseGrid = document.querySelector("#courseGrid");
 const courseCount = document.querySelector("#courseCount");
@@ -38,19 +38,25 @@ function loadTeacherCourses() {
 }
 
 const teacherCourses = loadTeacherCourses();
+const courses = teacherCourses;
 
 // Use teacher courses as the only source when available.
 // Otherwise, show the existing sample catalog as a fallback.
-const courses = teacherCourses.length > 0
-    ? teacherCourses
-    : sampleCourses;
+// const courses = teacherCourses.length > 0
+//     ? teacherCourses
+//     : sampleCourses;
 
 function renderCourses() {
     courseGrid.replaceChildren();
 
     if (courses.length === 0) {
+        // const emptyMessage = document.createElement("p");
+        // emptyMessage.textContent = "No courses are available yet.";
+        // courseGrid.append(emptyMessage);
         const emptyMessage = document.createElement("p");
-        emptyMessage.textContent = "No courses are available yet.";
+        emptyMessage.className = "courses-empty-state";
+        emptyMessage.textContent =
+            "No courses have been added yet. Courses will appear here once a teacher adds them.";
         courseGrid.append(emptyMessage);
     }
 

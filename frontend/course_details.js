@@ -7,13 +7,13 @@ const CONTENT_STORAGE_PREFIX = "learnspaceContent_";
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_SUBMISSION_SIZE = 2 * 1024 * 1024;
 
-const DEMO_STUDENT_ID = "demo-student";
-const ATTENDANCE_THRESHOLD = 75; // Example only; not an official rule.
+// const DEMO_STUDENT_ID = "demo-student";
+// const ATTENDANCE_THRESHOLD = 75; // Example only; not an official rule.
 
 const courseId = new URLSearchParams(window.location.search).get("course");
-const sampleCourses = Array.isArray(window.courseCatalog)
-    ? window.courseCatalog
-    : [];
+// const sampleCourses = Array.isArray(window.courseCatalog)
+//     ? window.courseCatalog
+//     : [];
 
 const courseContent = document.querySelector("#courseContent");
 const pageMessage = document.querySelector("#pageMessage");
@@ -298,15 +298,15 @@ function getSelectedCourse() {
         );
 
         // Preserve matching sample attendance records without changing their data.
-        const matchingSample = sampleCourses.find((item) =>
-            (item.title || "").trim().toLowerCase() ===
-            (teacherCourse.name || "").trim().toLowerCase()
-        );
+        // const matchingSample = sampleCourses.find((item) =>
+        //     (item.title || "").trim().toLowerCase() ===
+        //     (teacherCourse.name || "").trim().toLowerCase()
+        // );
 
-        const attendance = (matchingSample?.attendance || []).map((record) => ({
-            ...record,
-            courseId
-        }));
+        // const attendance = (matchingSample?.attendance || []).map((record) => ({
+        //     ...record,
+        //     courseId
+        // }));
 
         return {
             id: courseId,
@@ -319,15 +319,15 @@ function getSelectedCourse() {
                 name: teacherCourse.instructor || "Instructor not listed",
                 photo: ""
             },
-            attendance,
+            // attendance,
 
-            resources: content.materials.map((item) => ({
-                title: item.title || item.fileName || "Untitled material",
-                type: normalizeMaterialType(item.type),
-                filename: item.fileName || "",
-                fileData: item.fileData || "",
-                url: item.url || ""
-            })),
+            // resources: content.materials.map((item) => ({
+            //     title: item.title || item.fileName || "Untitled material",
+            //     type: normalizeMaterialType(item.type),
+            //     filename: item.fileName || "",
+            //     fileData: item.fileData || "",
+            //     url: item.url || ""
+            // })),
 
             assignments: mapTeacherAssignments(
                 content.assignments,
@@ -349,35 +349,36 @@ function getSelectedCourse() {
     }
 
     // Keep the existing sample courses and attendance available as fallback.
-    const sampleCourse = sampleCourses.find((item) => item.id === courseId);
-    if (!sampleCourse) return null;
+    // const sampleCourse = sampleCourses.find((item) => item.id === courseId);
+    // if (!sampleCourse) return null;
 
-    let content = readCourseContent(courseId);
-    content = processAutomaticSubmissions(
-        courseId,
-        sampleCourse.assignments || [],
-        content
-    );
+    // let content = readCourseContent(courseId);
+    // content = processAutomaticSubmissions(
+    //     courseId,
+    //     sampleCourse.assignments || [],
+    //     content
+    // );
 
-    return {
-        ...sampleCourse,
-        teacherManaged: false,
-        assignments: (sampleCourse.assignments || []).map((assignment) => {
-            const submission = findStudentSubmission(
-                content.submissions,
-                assignment.id
-            );
+    // return {
+    //     // ...sampleCourse,
+    //     teacherManaged: false,
+    //     assignments: (sampleCourse.assignments || []).map((assignment) => {
+    //         const submission = findStudentSubmission(
+    //             content.submissions,
+    //             assignment.id
+    //         );
 
-            let status = assignment.status || "Available";
-            if (submission?.status === "under-review") status = "Under review";
-            if (submission?.status === "submitted") status = "Submitted";
-            if (submission?.status === "auto-submitted") {
-                status = "Auto-submitted";
-            }
+    //         let status = assignment.status || "Available";
+    //         if (submission?.status === "under-review") status = "Under review";
+    //         if (submission?.status === "submitted") status = "Submitted";
+    //         if (submission?.status === "auto-submitted") {
+    //             status = "Auto-submitted";
+    //         }
 
-            return { ...assignment, status, submission };
-        })
-    };
+    //         return null;
+    //     })
+    // };
+    return null;
 }
 
 activeCourse = getSelectedCourse();
@@ -512,50 +513,73 @@ function renderOverview(selectedCourse) {
 }
 
 // Existing attendance calculations are intentionally unchanged.
-function renderAttendance(selectedCourse) {
-    const records = (selectedCourse.attendance || []).filter((record) =>
-        record.studentId === DEMO_STUDENT_ID &&
-        record.courseId === selectedCourse.id
-    );
+// function renderAttendance(selectedCourse) {
+//     const records = (selectedCourse.attendance || []).filter((record) =>
+//         record.studentId === DEMO_STUDENT_ID &&
+//         record.courseId === selectedCourse.id
+//     );
 
-    const total = records.length;
-    const attended = records.filter((record) =>
-        ["present", "late"].includes((record.status || "").toLowerCase())
-    ).length;
-    const missed = records.filter((record) =>
-        (record.status || "").toLowerCase() === "absent"
-    ).length;
-    const percentage = total === 0
-        ? 0
-        : Math.round((attended / total) * 100);
+//     const total = records.length;
+//     const attended = records.filter((record) =>
+//         ["present", "late"].includes((record.status || "").toLowerCase())
+//     ).length;
+//     const missed = records.filter((record) =>
+//         (record.status || "").toLowerCase() === "absent"
+//     ).length;
+//     const percentage = total === 0
+//         ? 0
+//         : Math.round((attended / total) * 100);
 
-    const circumference = 2 * Math.PI * 49;
-    const ring = document.querySelector("#ringValue");
+//     const circumference = 2 * Math.PI * 49;
+//     const ring = document.querySelector("#ringValue");
 
-    document.querySelector("#attendedCount").textContent = attended;
-    document.querySelector("#classCount").textContent = total;
-    document.querySelector("#attendancePercent").textContent =
-        `${percentage}%`;
-    document.querySelector("#attendanceRing").setAttribute(
-        "aria-label",
-        `Attendance ${percentage} percent`
-    );
+//     document.querySelector("#attendedCount").textContent = attended;
+//     document.querySelector("#classCount").textContent = total;
+//     document.querySelector("#attendancePercent").textContent =
+//         `${percentage}%`;
+//     document.querySelector("#attendanceRing").setAttribute(
+//         "aria-label",
+//         `Attendance ${percentage} percent`
+//     );
 
-    ring.style.strokeDasharray = circumference.toFixed(3);
-    ring.style.strokeDashoffset =
-        (circumference * (1 - percentage / 100)).toFixed(3);
+//     ring.style.strokeDasharray = circumference.toFixed(3);
+//     ring.style.strokeDashoffset =
+//         (circumference * (1 - percentage / 100)).toFixed(3);
 
-    document.querySelector("#attendanceDetail").textContent = total
-        ? `${missed} ${missed === 1 ? "class missed" : "classes missed"} · Late counts as attended`
-        : "No classes have been recorded yet.";
+//     document.querySelector("#attendanceDetail").textContent = total
+//         ? `${missed} ${missed === 1 ? "class missed" : "classes missed"} · Late counts as attended`
+//         : "No classes have been recorded yet.";
 
-    const thresholdMessage = total
-        ? (percentage >= ATTENDANCE_THRESHOLD ? "Above" : "Below") +
-          ` the example ${ATTENDANCE_THRESHOLD}% threshold`
-        : `Example threshold: ${ATTENDANCE_THRESHOLD}%`;
+//     const thresholdMessage = total
+//         ? (percentage >= ATTENDANCE_THRESHOLD ? "Above" : "Below") +
+//           ` the example ${ATTENDANCE_THRESHOLD}% threshold`
+//         : `Example threshold: ${ATTENDANCE_THRESHOLD}%`;
 
-    document.querySelector("#attendanceThreshold").textContent =
-        `${thresholdMessage} · Example only`;
+//     document.querySelector("#attendanceThreshold").textContent =
+//         `${thresholdMessage} · Example only`;
+// }
+
+function renderAttendance() {
+    // document.querySelector("#attendedCount").textContent = "—";
+    // document.querySelector("#classCount").textContent = "—";
+    // document.querySelector("#attendancePercent").textContent = "—";
+    // document.querySelector("#attendanceDetail").textContent =
+    //     "Attendance data is not available yet.";
+    // document.querySelector("#attendanceThreshold").textContent = "";
+
+    // document.querySelector("#attendanceRing").setAttribute(
+    //     "aria-label",
+    //     "Attendance data is not available yet"
+    // );
+
+    // const ring = document.querySelector("#ringValue");
+    // ring.style.strokeDasharray = "0";
+    // ring.style.strokeDashoffset = "0";
+     const message = document.querySelector("#attendanceUnavailable");
+
+    if (message) {
+        message.textContent = "Attendance data is not available yet.";
+    }
 }
 
 function fileIconType(type) {
@@ -726,6 +750,12 @@ function renderAssignments(selectedCourse) {
     });
 }
 
+function canShowQuizResult(quiz) {
+    return quiz.resultVisibility === "immediate" ||
+        (quiz.resultVisibility === "teacher-release" &&
+         quiz.resultsReleased === true);
+}
+
 // Render published quizzes; a missing form URL remains clearly unavailable.
 function renderQuizzes(selectedCourse) {
     const list = document.querySelector("#quizList");
@@ -790,7 +820,12 @@ function renderQuizzes(selectedCourse) {
             });
         } else {
             start.addEventListener("click", () => {
+                 if (!isConfiguredFormUrl(quiz.formUrl)) {
+                feedback.textContent = "A valid Google Forms link is not available yet.";
+                return;
+            }
                 window.open(quiz.formUrl, "_blank", "noopener,noreferrer");
+
             });
         }
 

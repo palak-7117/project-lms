@@ -871,6 +871,17 @@ function showQuizForm() {
     const startAt = makeInput("quizStart", "datetime-local");
     const dueAt = makeInput("quizDue", "datetime-local");
 
+    const resultVisibility = makeSelect("quizResultVisibility", [
+        ["immediate", "Show marks immediately after submission"],
+        ["teacher-release", "Show marks after I release results"]
+    ]);
+
+    const formUrl = makeInput(
+        "quizFormUrl",
+        "url",
+        "https://forms.gle/..."
+    );
+
     form.append(
         makeField("Quiz title", title, true),
         makeField("Description", description),
@@ -878,7 +889,9 @@ function showQuizForm() {
         makeField("Number of questions", questionCount, true),
         makeField("Duration (minutes)", duration, true),
         makeField("Opening date and time", startAt, true),
-        makeField("Closing date and time", dueAt, true)
+        makeField("Closing date and time", dueAt, true),
+        makeField("When students can see marks", resultVisibility, true),
+        makeField("Google Forms URL (optional)", formUrl),
     );
 
     const actions = element("div", "course-form-actions");
@@ -910,7 +923,10 @@ function showQuizForm() {
             startAt: startAt.value,
             dueAt: dueAt.value,
             published: false,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            resultVisibility: resultVisibility.value,
+            resultsReleased: false,
+            formUrl: formUrl.value.trim()
         };
 
         content.quizzes.push(quiz);

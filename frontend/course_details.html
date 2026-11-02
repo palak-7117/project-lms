@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#f7f8f5">
     <title>LearnSpace | Course Details</title>
     <link rel="stylesheet" href="course_details.css">
-    <script src="course_data.js" defer></script>
+    <!-- <script src="course_data.js" defer></script> -->
     <script src="course_details.js" defer></script>
 </head>
 <body>
@@ -19,7 +19,7 @@
                     <span class="brand-tagline">A place to grow</span>
                 </span>
             </a>
-            <span class="student-avatar" aria-label="Demonstration student">JD</span>
+            <span class="student-avatar" aria-label="Student profile">S</span>
         </header>
 
         <a class="back-link" href="student_courses.html">
@@ -51,20 +51,9 @@
                 <section class="attendance-summary" aria-labelledby="attendanceTitle">
                     <div class="attendance-copy">
                         <p class="eyebrow" id="attendanceTitle">ATTENDANCE</p>
-                        <p class="attendance-total">
-                            <strong id="attendedCount">0</strong> of
-                            <strong id="classCount">0</strong><br>
-                            classes attended
+                        <p class="attendance-detail" id="attendanceUnavailable">
+                            Attendance data is not available yet.
                         </p>
-                        <p class="attendance-detail" id="attendanceDetail"></p>
-                        <p class="attendance-threshold" id="attendanceThreshold"></p>
-                    </div>
-                    <div class="attendance-ring" id="attendanceRing" role="img" aria-label="Attendance 0 percent">
-                        <svg viewBox="0 0 120 120" aria-hidden="true">
-                            <circle class="ring-track" cx="60" cy="60" r="49"></circle>
-                            <circle class="ring-value" id="ringValue" cx="60" cy="60" r="49"></circle>
-                        </svg>
-                        <span class="ring-label" id="attendancePercent">0%</span>
                     </div>
                 </section>
             </section>
