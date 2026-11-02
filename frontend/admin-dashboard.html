@@ -4,38 +4,177 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="theme-color" content="#F1F2EB">
-    <title>LearnSpace | Admin Setup</title>
+    <title>LearnSpace | Admin Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="admin-dashboard.css">
+    <script src="admin-dashboard.js" defer></script>
 </head>
-<body>
-    <main class="page-shell">
-        <header class="site-header">
-            <a class="brand" href="index.html" aria-label="LearnSpace home">
-                <span class="brand-icon">L</span>
-                <span>
-                    <span class="brand-name">learnspace</span>
-                    <span class="brand-tagline">A place to grow</span>
-                </span>
-            </a>
-            <span class="header-note">Admin demo setup</span>
-        </header>
+<body class="admin-page">
+    <a class="skip-link" href="#mainContent">Skip to main content</a>
 
-        <section class="welcome-section">
-            <p class="eyebrow">ADMIN MODULE · PHASE 1</p>
-            <h1>Admin setup is next.</h1>
-            <p class="welcome-description">
-                Admin accounts are not created by the login form. To explicitly
-                create the first demo Admin, open the browser console on the
-                LearnSpace home page and run:
-                <br><code>window.provisionLearnSpaceAdmin("admin@example.edu", "LearnSpace Admin")</code>
+    <header class="admin-topbar">
+        <a class="brand" href="index.html" aria-label="LearnSpace home">
+            <span class="brand-icon" aria-hidden="true">L</span>
+            <span>
+                <span class="brand-name">learnspace</span>
+                <span class="brand-tagline">A place to grow</span>
+            </span>
+        </a>
+
+        <div class="admin-topbar-right">
+            <span class="demo-label">Admin demo</span>
+            <a class="home-link" href="index.html">Return to home</a>
+        </div>
+    </header>
+
+    <div class="admin-layout">
+        <aside class="admin-sidebar" aria-label="Dashboard sidebar">
+            <p class="sidebar-label">ADMINISTRATION</p>
+            <nav class="admin-navigation" aria-label="Admin dashboard">
+                <a href="#overview">Overview</a>
+                <a href="#students">Students</a>
+                <a href="#teachers">Teachers</a>
+                <a href="#semesters">Semesters</a>
+                <a href="#curriculum">Curriculum</a>
+            </nav>
+            <p class="sidebar-note">
+                This foundation is read-only. Management workflows will be added
+                in later phases.
             </p>
-            <p class="welcome-description">
-                This demo setup only appends a new Admin account. If the email
-                already belongs to another role, setup is refused. Demo login
-                and role navigation do not verify credentials and are not secure.
-            </p>
-            <a class="course-back-link" href="index.html">← Return to LearnSpace</a>
-        </section>
-    </main>
+        </aside>
+
+        <main class="admin-main" id="mainContent" tabindex="-1">
+            <section class="admin-overview" id="overview" aria-labelledby="overviewTitle">
+                <p class="eyebrow">ADMIN DASHBOARD</p>
+                <h1 id="overviewTitle">A clear view of your learning community.</h1>
+                <p class="overview-intro">
+                    Review the current demo data and find the tools planned for
+                    future management workflows.
+                </p>
+
+                <p class="session-indicator" id="sessionIndicator"
+                   role="status" aria-live="polite">
+                    Checking demo session…
+                </p>
+                <p class="demo-disclaimer">
+                    This is a localStorage demo. The session indicator is not
+                    secure authentication and does not control access to this page.
+                </p>
+
+                <div class="overview-grid" role="group" aria-label="Current data summary">
+                    <article class="overview-card overview-card-students">
+                        <p class="card-kicker">STUDENT PROFILES</p>
+                        <p class="card-value" id="studentProfileCount" aria-live="polite">
+                            Loading…
+                        </p>
+                        <p class="card-caption">
+                            Saved student profiles with valid required fields and
+                            user links.
+                        </p>
+                    </article>
+                    <article class="overview-card overview-card-teachers">
+                        <p class="card-kicker">TEACHER PROFILES</p>
+                        <p class="card-value" id="teacherProfileCount" aria-live="polite">
+                            Loading…
+                        </p>
+                        <p class="card-caption">
+                            Saved teacher profiles with valid required fields and
+                            user links.
+                        </p>
+                    </article>
+                    <article class="overview-card overview-card-muted">
+                        <p class="card-kicker">SEMESTERS</p>
+                        <p class="card-value card-value-label">Not configured</p>
+                        <p class="card-caption">
+                            Semester management is planned for a later phase.
+                        </p>
+                    </article>
+                    <article class="overview-card overview-card-muted">
+                        <p class="card-kicker">CURRICULUM</p>
+                        <p class="card-value card-value-label">Not configured</p>
+                        <p class="card-caption">
+                            Official curriculum management is planned for a later phase.
+                        </p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="management-section" id="students" aria-labelledby="studentsTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">PEOPLE</p>
+                    <h2 id="studentsTitle">Student management</h2>
+                </div>
+                <div class="placeholder-panel">
+                    <span class="section-symbol" aria-hidden="true">✳</span>
+                    <div>
+                        <h3>Student workflows are coming later.</h3>
+                        <p>
+                            Admission review, authorization, and semester allocation
+                            are not available in this dashboard foundation.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="management-section" id="teachers" aria-labelledby="teachersTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">PEOPLE</p>
+                    <h2 id="teachersTitle">Teacher management</h2>
+                </div>
+                <div class="placeholder-panel">
+                    <span class="section-symbol" aria-hidden="true">✦</span>
+                    <div>
+                        <h3>Teacher account workflows are coming later.</h3>
+                        <p>
+                            Account creation and activation controls are not available
+                            yet. Teachers will continue to manage their own course
+                            offerings and course content.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="management-section" id="semesters" aria-labelledby="semestersTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">ACADEMIC STRUCTURE</p>
+                    <h2 id="semestersTitle">Semesters</h2>
+                </div>
+                <div class="placeholder-panel">
+                    <span class="section-symbol" aria-hidden="true">◷</span>
+                    <div>
+                        <h3>Semester management is not configured.</h3>
+                        <p>
+                            Creating, activating, and deactivating semesters will be
+                            added in a later phase. No semester records have been
+                            created by this page.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <section class="management-section" id="curriculum" aria-labelledby="curriculumTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">ACADEMIC STRUCTURE</p>
+                    <h2 id="curriculumTitle">Curriculum</h2>
+                </div>
+                <div class="placeholder-panel">
+                    <span class="section-symbol" aria-hidden="true">⌘</span>
+                    <div>
+                        <h3>Official curriculum is not configured.</h3>
+                        <p>
+                            Curriculum courses and semester membership will be
+                            managed here in a later phase. Teacher-created course
+                            offerings remain separate and are not shown as curriculum.
+                        </p>
+                    </div>
+                </div>
+            </section>
+
+            <footer class="admin-footer">
+                <span>LEARN SOMETHING NEW, EVERY DAY.</span>
+                <span>MADE FOR CURIOUS MINDS ✳</span>
+            </footer>
+        </main>
+    </div>
 </body>
 </html>
