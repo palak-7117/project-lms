@@ -414,6 +414,78 @@ function addDeleteButton(card, collection, id, itemName) {
     );
 }
 
+function decodePdfDataUrl(dataUrl) {
+    if (typeof dataUrl !== "string") return null;
+
+    const match = dataUrl.match(
+        /^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/i
+    );
+
+    if (!match) return null;
+
+    try {
+        const binary = atob(match[1]);
+        const headerLength = Math.min(binary.length, 1024);
+
+        if (!binary.slice(0, headerLength).includes("%PDF-")) return null;
+
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        return bytes;
+    } catch (error) {
+        return null;
+    }
+}
+
+function openPdfInNewTab(dataUrl) {
+    const bytes = decodePdfDataUrl(dataUrl);
+
+    if (!bytes) {
+        alert("This PDF is missing or invalid. Please upload it again.");
+        return;
+    }
+
+    let pdfUrl;
+
+    try {
+        pdfUrl = URL.createObjectURL(
+            new Blob([bytes], { type: "application/pdf" })
+        );
+    } catch (error) {
+        alert("This PDF could not be opened in your browser.");
+        return;
+    }
+
+    const pdfWindow = window.open("about:blank", "_blank");
+
+    if (!pdfWindow) {
+        URL.revokeObjectURL(pdfUrl);
+        alert("The PDF tab could not be opened. Please allow pop-ups and try again.");
+        return;
+    }
+
+    pdfWindow.opener = null;
+
+    try {
+        pdfWindow.location.replace(pdfUrl);
+    } catch (error) {
+        pdfWindow.close();
+        URL.revokeObjectURL(pdfUrl);
+        alert("This PDF could not be opened in your browser.");
+        return;
+    }
+
+    const cleanupTimer = window.setInterval(() => {
+        if (!pdfWindow.closed) return;
+
+        window.clearInterval(cleanupTimer);
+        URL.revokeObjectURL(pdfUrl);
+    }, 1000);
+}
+
 function renderMaterials() {
     const header = makeSectionHeader(
         "Books & Notes",
@@ -446,10 +518,12 @@ function renderMaterials() {
 
         if (item.fileData) {
             const openLink = element("a", "course-resource-link", "Open PDF");
-            openLink.href = item.fileData;
-            openLink.target = "_blank";
-            openLink.rel = "noopener noreferrer";
+            openLink.href = "#";
             openLink.setAttribute("aria-label", `Open ${item.fileName}`);
+            openLink.addEventListener("click", (event) => {
+                event.preventDefault();
+                openPdfInNewTab(item.fileData);
+            });
             card.appendChild(openLink);
         } else if (item.url) {
             const openLink = element(

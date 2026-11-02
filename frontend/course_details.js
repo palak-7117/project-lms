@@ -610,9 +610,80 @@ function createEmptyState(text) {
     return empty;
 }
 
+function decodePdfDataUrl(dataUrl) {
+    if (typeof dataUrl !== "string") return null;
+
+    const match = dataUrl.match(
+        /^data:application\/pdf;base64,([A-Za-z0-9+/]+={0,2})$/i
+    );
+
+    if (!match) return null;
+
+    try {
+        const binary = atob(match[1]);
+        const headerLength = Math.min(binary.length, 1024);
+
+        if (!binary.slice(0, headerLength).includes("%PDF-")) return null;
+
+        const bytes = new Uint8Array(binary.length);
+        for (let index = 0; index < binary.length; index += 1) {
+            bytes[index] = binary.charCodeAt(index);
+        }
+
+        return bytes;
+    } catch (error) {
+        return null;
+    }
+}
+
 function isValidPdfDataUrl(value) {
-    return typeof value === "string" &&
-        /^data:application\/pdf;base64,/i.test(value);
+    return decodePdfDataUrl(value) !== null;
+}
+
+function openPdfInNewTab(dataUrl) {
+    const bytes = decodePdfDataUrl(dataUrl);
+
+    if (!bytes) {
+        alert("This PDF is missing or invalid. Please contact your teacher.");
+        return;
+    }
+
+    let pdfUrl;
+
+    try {
+        pdfUrl = URL.createObjectURL(
+            new Blob([bytes], { type: "application/pdf" })
+        );
+    } catch (error) {
+        alert("This PDF could not be opened in your browser.");
+        return;
+    }
+
+    const pdfWindow = window.open("about:blank", "_blank");
+
+    if (!pdfWindow) {
+        URL.revokeObjectURL(pdfUrl);
+        alert("The PDF tab could not be opened. Please allow pop-ups and try again.");
+        return;
+    }
+
+    pdfWindow.opener = null;
+
+    try {
+        pdfWindow.location.replace(pdfUrl);
+    } catch (error) {
+        pdfWindow.close();
+        URL.revokeObjectURL(pdfUrl);
+        alert("This PDF could not be opened in your browser.");
+        return;
+    }
+
+    const cleanupTimer = window.setInterval(() => {
+        if (!pdfWindow.closed) return;
+
+        window.clearInterval(cleanupTimer);
+        URL.revokeObjectURL(pdfUrl);
+    }, 1000);
 }
 
 function getExternalResourceUrl(value) {
@@ -669,8 +740,12 @@ function renderResources(selectedCourse) {
         action.rel = "noopener noreferrer";
 
         if (isValidPdfDataUrl(resource.fileData)) {
-            action.href = resource.fileData;
+            action.href = "#";
             action.textContent = "View PDF";
+            action.addEventListener("click", (event) => {
+                event.preventDefault();
+                openPdfInNewTab(resource.fileData);
+            });
         } else {
             const externalUrl = getExternalResourceUrl(resource.url);
 
