@@ -154,10 +154,11 @@
                 <div class="academic-data-panel">
                     <p class="data-state" id="curriculumViewStatus" role="status"
                        aria-live="polite">Loading curriculum data…</p>
-                    <form class="course-form-panel" id="addCourseForm">
+                    <form class="course-form-panel" id="addCourseForm"
+                          aria-labelledby="courseFormTitle">
                         <div class="course-form-heading">
                             <p class="eyebrow">CURRICULUM SETUP</p>
-                            <h3>Add an official course</h3>
+                            <h3 id="courseFormTitle">Add an official course</h3>
                             <p>These are curriculum courses. Teacher course offerings remain separate.</p>
                         </div>
 
@@ -182,8 +183,12 @@
                         </div>
 
                         <div class="course-form-actions">
-                            <button class="course-submit-button" type="submit">Add Course</button>
-                            <button class="course-reset-button" type="reset">Clear fields</button>
+                            <button class="course-submit-button" id="courseSubmitButton"
+                                    type="submit">Add Course</button>
+                            <button class="course-reset-button" id="courseResetButton"
+                                    type="reset">Clear fields</button>
+                            <button class="course-cancel-button" id="cancelCourseEditButton"
+                                    type="button" hidden>Cancel Editing</button>
                         </div>
                         <p class="form-feedback" id="courseFormStatus" role="status"
                            aria-live="polite"></p>

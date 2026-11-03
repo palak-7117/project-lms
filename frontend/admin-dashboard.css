@@ -399,12 +399,32 @@
     background: #46523a;
 }
 
-.course-reset-button {
+.course-reset-button,
+.course-cancel-button {
     background: rgba(255, 254, 250, 0.8);
     color: var(--olive, #566246);
 }
 
-.course-reset-button:hover {
+.course-reset-button:hover,
+.course-cancel-button:hover {
+    background: rgba(164, 194, 165, 0.2);
+}
+
+.course-edit-button {
+    flex: 0 0 auto;
+    min-height: 34px;
+    padding: 7px 11px;
+    border: 1px solid var(--olive, #566246);
+    border-radius: 5px;
+    background: rgba(255, 254, 250, 0.8);
+    color: var(--olive, #566246);
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.course-edit-button:hover {
     background: rgba(164, 194, 165, 0.2);
 }
 

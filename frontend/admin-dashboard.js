@@ -19,6 +19,8 @@ const allowedRoles = new Set(["student", "teacher", "admin"]);
 const allowedAccountStatuses = new Set(["active", "disabled", "pending"]);
 const allowedAdmissionStatuses = new Set(["pending", "admitted", "rejected"]);
 const allowedAuthorizationStatuses = new Set(["pending", "authorized", "revoked"]);
+let selectedCurriculumCourseId = null;
+let selectedCurriculumCourseSnapshot = null;
 
 // These helpers support Admin accounts, profiles, semesters, and official
 // curriculum. Teacher offerings and their content keys are not accepted here.
@@ -800,7 +802,9 @@ function renderCurriculumCards(
 ) {
     for (const course of courses) {
         const card = createRecordCard();
+        const header = document.createElement("div");
         const code = document.createElement("span");
+        const editButton = document.createElement("button");
         const title = document.createElement("h3");
         const details = document.createElement("dl");
         const membershipRow = document.createElement("div");
@@ -809,6 +813,13 @@ function renderCurriculumCards(
 
         code.className = "course-code";
         code.textContent = course.code;
+        editButton.className = "course-edit-button";
+        editButton.type = "button";
+        editButton.textContent = "Edit";
+        editButton.setAttribute("aria-label", `Edit ${course.code} — ${course.name}`);
+        editButton.addEventListener("click", () => startCourseEditing(course.id));
+        header.className = "record-card-header";
+        header.append(code, editButton);
         title.textContent = course.name;
         details.className = "record-details";
         addRecordDetail(
@@ -843,7 +854,7 @@ function renderCurriculumCards(
 
         membershipRow.append(membershipLabel, membershipDescription);
         details.append(membershipRow);
-        card.append(code, title, details);
+        card.append(header, title, details);
         listElement.append(card);
     }
 }
@@ -974,6 +985,68 @@ function setCourseFormFeedback(message, isError = false) {
     feedback.classList.toggle("is-error", isError);
 }
 
+function setCourseFormMode(isEditing) {
+    document.querySelector("#courseFormTitle").textContent = isEditing
+        ? "Edit official course"
+        : "Add an official course";
+    document.querySelector("#courseSubmitButton").textContent = isEditing
+        ? "Save Changes"
+        : "Add Course";
+    document.querySelector("#courseResetButton").hidden = isEditing;
+    document.querySelector("#cancelCourseEditButton").hidden = !isEditing;
+}
+
+function startCourseEditing(courseId) {
+    const adminData = window.LearnSpaceAdminData;
+    let snapshot;
+    try {
+        snapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    } catch (error) {
+        setCourseFormFeedback("Curriculum data could not be read. No data was changed.", true);
+        return;
+    }
+
+    if (snapshot.state === "missing") {
+        setCourseFormFeedback("This course is no longer available. Refresh the list before editing.", true);
+        return;
+    }
+
+    if (!isReadableAcademicCollection(snapshot)) {
+        setCourseFormFeedback(getCourseCreationStorageError(snapshot), true);
+        return;
+    }
+
+    const validation = adminData.validateCurriculumCourses(snapshot.records);
+    if (!validation.success) {
+        setCourseFormFeedback(validation.message, true);
+        return;
+    }
+
+    const course = snapshot.records.find((record) => record.id === courseId);
+    if (!course) {
+        setCourseFormFeedback("This course is no longer available. Refresh the list before editing.", true);
+        return;
+    }
+
+    selectedCurriculumCourseId = course.id;
+    selectedCurriculumCourseSnapshot = JSON.stringify(course);
+    setCourseFormMode(true);
+    document.querySelector("#courseCode").value = course.code;
+    document.querySelector("#courseName").value = course.name;
+    document.querySelector("#courseDescription").value = course.description;
+    setCourseFormFeedback(`Editing ${course.code} — ${course.name}.`);
+    document.querySelector("#courseCode").focus();
+}
+
+function cancelCourseEditing() {
+    selectedCurriculumCourseId = null;
+    selectedCurriculumCourseSnapshot = null;
+    setCourseFormMode(false);
+    document.querySelector("#addCourseForm").reset();
+    setCourseFormFeedback("");
+    document.querySelector("#courseCode").focus();
+}
+
 function getCourseCreationStorageError(snapshot) {
     if (snapshot.state === "malformed-json") {
         return "Saved curriculum data is malformed JSON. It was left unchanged.";
@@ -1006,6 +1079,11 @@ function handleAddCourseSubmit(event) {
 
     if (!code || !name) {
         setCourseFormFeedback("Course code and course name cannot contain only whitespace.", true);
+        return;
+    }
+
+    if (selectedCurriculumCourseId !== null) {
+        handleEditCourseSubmit(code, name, description);
         return;
     }
 
@@ -1067,13 +1145,109 @@ function handleAddCourseSubmit(event) {
 
     form.reset();
     setCourseFormFeedback("Course added to the official curriculum.");
-    renderAcademicStructure();
+    try {
+        renderAcademicStructure();
+    } catch (error) {
+        setCourseFormFeedback("Course added, but the list could not refresh. Reload the page to verify it.", true);
+    }
+}
+
+function handleEditCourseSubmit(code, name, description) {
+    const courseId = selectedCurriculumCourseId;
+    const adminData = window.LearnSpaceAdminData;
+    let snapshot;
+    try {
+        snapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    } catch (error) {
+        setCourseFormFeedback("Curriculum data could not be read. No data was changed.", true);
+        return;
+    }
+
+    if (!isReadableAcademicCollection(snapshot)) {
+        if (snapshot.state === "missing") {
+            setCourseFormFeedback("This course no longer exists. No new course was created.", true);
+        } else {
+            setCourseFormFeedback(getCourseCreationStorageError(snapshot), true);
+        }
+        return;
+    }
+
+    const existingValidation = adminData.validateCurriculumCourses(snapshot.records);
+    if (!existingValidation.success) {
+        setCourseFormFeedback(existingValidation.message, true);
+        return;
+    }
+
+    const selectedCourse = snapshot.records.find((course) => course.id === courseId);
+    if (!selectedCourse) {
+        setCourseFormFeedback("This course no longer exists. No new course was created.", true);
+        return;
+    }
+    if (JSON.stringify(selectedCourse) !== selectedCurriculumCourseSnapshot) {
+        setCourseFormFeedback(
+            "This course changed in another tab. Cancel editing and reopen it before saving.",
+            true
+        );
+        return;
+    }
+
+    let selectedCourseUpdated = false;
+    let result;
+    try {
+        result = adminData.updateArrayInStorage(
+            CURRICULUM_COURSE_STORAGE_KEY,
+            (draftRecords) => {
+                const course = draftRecords.find((record) => record.id === courseId);
+                if (!course) return draftRecords;
+                if (JSON.stringify(course) !== selectedCurriculumCourseSnapshot) {
+                    return draftRecords;
+                }
+
+                course.code = code;
+                course.name = name;
+                course.description = description;
+                selectedCourseUpdated = true;
+                return draftRecords;
+            }
+        );
+    } catch (error) {
+        setCourseFormFeedback("The course could not be updated safely. Existing data was left unchanged.", true);
+        return;
+    }
+
+    if (!result.success) {
+        setCourseFormFeedback(result.message, true);
+        return;
+    }
+
+    if (!selectedCourseUpdated) {
+        setCourseFormFeedback(
+            "This course changed or was removed before the update. Cancel editing and reopen it before saving.",
+            true
+        );
+        return;
+    }
+
+    selectedCurriculumCourseId = null;
+    selectedCurriculumCourseSnapshot = null;
+    setCourseFormMode(false);
+    document.querySelector("#addCourseForm").reset();
+    try {
+        renderAcademicStructure();
+        setCourseFormFeedback("Course changes saved.");
+    } catch (error) {
+        setCourseFormFeedback("Course changes were saved, but the list could not refresh. Reload the page to verify them.", true);
+    }
 }
 
 function initializeCourseForm() {
     const form = document.querySelector("#addCourseForm");
     form.addEventListener("submit", handleAddCourseSubmit);
     form.addEventListener("reset", () => setCourseFormFeedback(""));
+    document.querySelector("#cancelCourseEditButton").addEventListener(
+        "click",
+        cancelCourseEditing
+    );
 }
 
 function renderDashboardSummary() {
