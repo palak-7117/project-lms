@@ -103,14 +103,85 @@
                     <p class="eyebrow">PEOPLE</p>
                     <h2 id="studentsTitle">Student management</h2>
                 </div>
-                <div class="placeholder-panel">
-                    <span class="section-symbol" aria-hidden="true">✳</span>
-                    <div>
-                        <h3>Student workflows are coming later.</h3>
-                        <p>
-                            Admission review, authorization, and semester allocation
-                            are not available in this dashboard foundation.
-                        </p>
+                <div class="student-directory-panel">
+                    <p class="data-state" id="studentDirectoryStatus" role="status"
+                       aria-live="polite">Loading Student directory…</p>
+
+                    <div class="student-summary-grid" role="group"
+                         aria-label="Student profile summary">
+                        <article class="overview-card overview-card-students">
+                            <p class="card-kicker">REGISTERED STUDENT PROFILES</p>
+                            <p class="card-value card-value-label" id="directoryTotalCount"
+                               aria-live="polite">Loading…</p>
+                            <p class="card-caption">Validated Student profiles linked to accounts.</p>
+                        </article>
+                        <article class="overview-card overview-card-teachers">
+                            <p class="card-kicker">ADMITTED</p>
+                            <p class="card-value card-value-label" id="directoryAdmittedCount"
+                               aria-live="polite">Loading…</p>
+                            <p class="card-caption">Profiles with admitted status.</p>
+                        </article>
+                        <article class="overview-card overview-card-muted">
+                            <p class="card-kicker">PENDING ADMISSIONS</p>
+                            <p class="card-value card-value-label" id="directoryPendingCount"
+                               aria-live="polite">Loading…</p>
+                            <p class="card-caption">Profiles awaiting an admission decision.</p>
+                        </article>
+                    </div>
+
+                    <div class="student-directory-controls" aria-label="Student directory filters">
+                        <div class="form-field student-directory-search">
+                            <label for="studentDirectorySearch">Search by student name or email</label>
+                            <input id="studentDirectorySearch" type="search"
+                                   autocomplete="off" placeholder="Search students">
+                        </div>
+                        <div class="form-field">
+                            <label for="studentAdmissionFilter">Admission status</label>
+                            <select id="studentAdmissionFilter">
+                                <option value="">All admission statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="admitted">Admitted</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="missing-profile">No profile</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="studentAuthorizationFilter">Authorization status</label>
+                            <select id="studentAuthorizationFilter">
+                                <option value="">All authorization statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="authorized">Authorized</option>
+                                <option value="revoked">Revoked</option>
+                                <option value="missing-profile">No profile</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="studentSemesterFilter">Semester</label>
+                            <select id="studentSemesterFilter">
+                                <option value="">All semesters</option>
+                            </select>
+                        </div>
+                        <button class="course-reset-button student-filter-reset" id="resetStudentFilters"
+                                type="button">Clear filters</button>
+                    </div>
+
+                    <p class="directory-result-status" id="studentDirectoryResults"
+                       role="status" aria-live="polite"></p>
+                    <div class="student-directory-table-wrap">
+                        <table class="student-directory-table">
+                            <caption class="student-directory-caption">Student accounts and academic profiles</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Student</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Account</th>
+                                    <th scope="col">Admission</th>
+                                    <th scope="col">Authorization</th>
+                                    <th scope="col">Semester</th>
+                                </tr>
+                            </thead>
+                            <tbody id="studentDirectoryRows"></tbody>
+                        </table>
                     </div>
                 </div>
             </section>

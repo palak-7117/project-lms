@@ -882,6 +882,367 @@ function getProfileCount(profileKey, role, usersState) {
     return validation.success ? String(profileState.records.length) : "Unavailable";
 }
 
+let studentDirectoryRecords = [];
+let studentDirectoryReady = false;
+
+function validateStudentDirectorySemesters(semesters) {
+    const idValidation = window.LearnSpaceAdminData.validateRecordIds(semesters, "id");
+    if (!idValidation.success) return idValidation;
+
+    // The directory only needs semester identity and display fields. The data
+    // source policy for this phase excludes curriculum records, so curriculum
+    // course references cannot be cross-validated here.
+    for (const semester of semesters) {
+        if (typeof semester.name !== "string" || !semester.name.trim() ||
+            typeof semester.academicYear !== "string" || !semester.academicYear.trim()) {
+            return { success: false, message: "A semester is missing its display name or academic year." };
+        }
+        if (semester.status !== "active" && semester.status !== "inactive") {
+            return { success: false, message: "A semester has an invalid status." };
+        }
+        if (!Array.isArray(semester.curriculumCourseIds)) {
+            return { success: false, message: "A semester has an invalid curriculumCourseIds list." };
+        }
+        const seenCourseIds = new Set();
+        for (const courseId of semester.curriculumCourseIds) {
+            if (typeof courseId !== "string" || !courseId.trim() || seenCourseIds.has(courseId)) {
+                return { success: false, message: "A semester has invalid or duplicate curriculum course IDs." };
+            }
+            seenCourseIds.add(courseId);
+        }
+        if (!hasValidCreatedAt(semester.createdAt)) {
+            return { success: false, message: "A semester has an invalid creation timestamp." };
+        }
+    }
+
+    return { success: true, message: "" };
+}
+
+function setStudentDirectoryMessage(message, state = "") {
+    const status = document.querySelector("#studentDirectoryStatus");
+    status.textContent = message;
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-warning", state === "warning");
+}
+
+function setStudentDirectoryCounts(total, admitted, pending) {
+    document.querySelector("#directoryTotalCount").textContent = total;
+    document.querySelector("#directoryAdmittedCount").textContent = admitted;
+    document.querySelector("#directoryPendingCount").textContent = pending;
+}
+
+function addStudentDirectoryOption(select, value, label) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+}
+
+function populateStudentSemesterFilter(semesters, semesterState, records) {
+    const select = document.querySelector("#studentSemesterFilter");
+    const previousValue = select.value;
+    select.replaceChildren();
+    addStudentDirectoryOption(select, "", "All semesters");
+
+    const semesterIds = new Set();
+    for (const semester of semesters) {
+        semesterIds.add(semester.id);
+        addStudentDirectoryOption(
+            select,
+            semester.id,
+            semester.status === "active"
+                ? semester.name
+                : `${semester.name} (Inactive)`
+        );
+    }
+
+    if (records.some((record) => !record.profile)) {
+        addStudentDirectoryOption(select, "__no_profile__", "No profile");
+    }
+    if (records.some((record) => record.profile && record.profile.semesterId === null)) {
+        addStudentDirectoryOption(select, "__unallocated__", "Not allocated");
+    }
+    if (records.some((record) => record.semesterState === "missing-reference")) {
+        addStudentDirectoryOption(select, "__missing__", "Missing semester reference");
+    }
+    if (semesterState === "unavailable" &&
+        records.some((record) => record.profile && record.profile.semesterId !== null)) {
+        addStudentDirectoryOption(select, "__unavailable__", "Semester data unavailable");
+    }
+
+    const selectionExists = Array.from(select.options).some((option) => option.value === previousValue);
+    select.value = selectionExists ? previousValue : "";
+}
+
+function appendDirectoryStatusCell(row, value, statusType = "") {
+    const cell = document.createElement("td");
+    const badge = document.createElement("span");
+    const displayValue = value || "Unavailable";
+    const statusClass = statusType || String(displayValue).toLowerCase().replace(/[^a-z0-9-]+/g, "-");
+    badge.className = `directory-status${statusClass ? ` is-${statusClass}` : ""}`;
+    badge.textContent = displayValue;
+    cell.append(badge);
+    row.append(cell);
+}
+
+function getStudentDirectoryFilteredRecords() {
+    const search = document.querySelector("#studentDirectorySearch").value.trim().toLowerCase();
+    const admissionFilter = document.querySelector("#studentAdmissionFilter").value;
+    const authorizationFilter = document.querySelector("#studentAuthorizationFilter").value;
+    const semesterFilter = document.querySelector("#studentSemesterFilter").value;
+
+    return studentDirectoryRecords.filter((record) => {
+        const name = record.user && typeof record.user.name === "string"
+            ? record.user.name.toLowerCase()
+            : "";
+        const email = record.user.email.toLowerCase();
+        if (search && !name.includes(search) && !email.includes(search)) return false;
+
+        if (admissionFilter === "missing-profile") {
+            if (record.profile) return false;
+        } else if (admissionFilter && (!record.profile || record.profile.admissionStatus !== admissionFilter)) {
+            return false;
+        }
+
+        if (authorizationFilter === "missing-profile") {
+            if (record.profile) return false;
+        } else if (authorizationFilter && (!record.profile || record.profile.authorizationStatus !== authorizationFilter)) {
+            return false;
+        }
+
+        if (!semesterFilter) return true;
+        if (semesterFilter === "__no_profile__") return !record.profile;
+        if (semesterFilter === "__unallocated__") {
+            return record.profile && record.profile.semesterId === null;
+        }
+        if (semesterFilter === "__missing__") return record.semesterState === "missing-reference";
+        if (semesterFilter === "__unavailable__") return record.semesterState === "unavailable";
+        return record.profile && record.profile.semesterId === semesterFilter;
+    });
+}
+
+function renderStudentDirectoryRows() {
+    const tbody = document.querySelector("#studentDirectoryRows");
+    const resultStatus = document.querySelector("#studentDirectoryResults");
+    tbody.replaceChildren();
+
+    const filteredRecords = getStudentDirectoryFilteredRecords();
+    if (filteredRecords.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.className = "student-directory-empty-cell";
+        cell.colSpan = 6;
+        cell.textContent = studentDirectoryReady
+            ? "No students match the current search and filters."
+            : "Student records are unavailable.";
+        row.append(cell);
+        tbody.append(row);
+    } else {
+        for (const record of filteredRecords) {
+            const row = document.createElement("tr");
+            const nameCell = document.createElement("td");
+            const emailCell = document.createElement("td");
+            const displayName = typeof record.user.name === "string" && record.user.name.trim()
+                ? record.user.name.trim()
+                : "Name not provided";
+            nameCell.textContent = displayName;
+            emailCell.textContent = record.user.email;
+            row.append(nameCell, emailCell);
+
+            const accountStatus = record.user.accountStatus;
+            appendDirectoryStatusCell(row, accountStatus, accountStatus);
+            if (!record.profile) {
+                appendDirectoryStatusCell(row, "No profile", "warning");
+                appendDirectoryStatusCell(row, "No profile", "warning");
+                appendDirectoryStatusCell(row, "No profile", "warning");
+            } else {
+                appendDirectoryStatusCell(row, record.profile.admissionStatus, record.profile.admissionStatus);
+                appendDirectoryStatusCell(row, record.profile.authorizationStatus, record.profile.authorizationStatus);
+
+                let semesterName;
+                let semesterStatus = "";
+                if (record.profile.semesterId === null) {
+                    semesterName = "Not allocated";
+                } else if (record.semesterState === "unavailable") {
+                    semesterName = "Semester data unavailable";
+                    semesterStatus = "warning";
+                } else if (record.semesterState === "missing-reference") {
+                    semesterName = `Missing semester reference: ${record.profile.semesterId}`;
+                    semesterStatus = "warning";
+                } else {
+                    semesterName = record.semester.name;
+                    if (record.semester.status === "inactive") {
+                        semesterName += " (Inactive)";
+                        semesterStatus = "warning";
+                    }
+                }
+                appendDirectoryStatusCell(row, semesterName, semesterStatus);
+            }
+            tbody.append(row);
+        }
+    }
+
+    if (studentDirectoryReady) {
+        resultStatus.textContent = `Showing ${filteredRecords.length} of ${studentDirectoryRecords.length} Student account${studentDirectoryRecords.length === 1 ? "" : "s"}.`;
+    } else {
+        resultStatus.textContent = "";
+    }
+}
+
+function renderStudentDirectory() {
+    studentDirectoryReady = false;
+    studentDirectoryRecords = [];
+    const usersState = readArrayFromStorage(USER_STORAGE_KEY);
+    const studentsState = readArrayFromStorage(STUDENT_STORAGE_KEY);
+    const semestersState = readArrayFromStorage(SEMESTER_STORAGE_KEY);
+
+    if (!isReadableArrayState(usersState.state)) {
+        setStudentDirectoryCounts("Unavailable", "Unavailable", "Unavailable");
+        setStudentDirectoryMessage(
+            usersState.state === "missing"
+                ? "Account data has not been configured, so Student profiles cannot be linked."
+                : usersState.message || "Account data is unavailable. The Student directory cannot be verified.",
+            "error"
+        );
+        renderStudentDirectoryRows();
+        return;
+    }
+    const usersValidation = window.LearnSpaceAdminData.validateUsers(usersState.records);
+    if (!usersValidation.success) {
+        setStudentDirectoryCounts("Unavailable", "Unavailable", "Unavailable");
+        setStudentDirectoryMessage(
+            `Account data is invalid. ${usersValidation.message} Student records are not shown.`,
+            "error"
+        );
+        renderStudentDirectoryRows();
+        return;
+    }
+
+    const studentUsers = usersState.records.filter((user) => user.role === "student");
+    let profiles = [];
+    let profilesConfigured = studentsState.state !== "missing";
+    if (profilesConfigured) {
+        if (!isReadableArrayState(studentsState.state)) {
+            setStudentDirectoryCounts("Unavailable", "Unavailable", "Unavailable");
+            setStudentDirectoryMessage(
+                studentsState.message || "Student profile data is unavailable. No profiles are shown.",
+                "error"
+            );
+            renderStudentDirectoryRows();
+            return;
+        }
+        const profileValidation = window.LearnSpaceAdminData.validateProfiles(
+            studentsState.records,
+            "student",
+            usersState.records
+        );
+        if (!profileValidation.success) {
+            setStudentDirectoryCounts("Unavailable", "Unavailable", "Unavailable");
+            setStudentDirectoryMessage(
+                `Student profile data is invalid. ${profileValidation.message} Records are not shown until the links are valid.`,
+                "error"
+            );
+            renderStudentDirectoryRows();
+            return;
+        }
+        profiles = studentsState.records;
+        setStudentDirectoryCounts(
+            String(profiles.length),
+            String(profiles.filter((profile) => profile.admissionStatus === "admitted").length),
+            String(profiles.filter((profile) => profile.admissionStatus === "pending").length)
+        );
+    } else {
+        setStudentDirectoryCounts("Not configured", "Not configured", "Not configured");
+    }
+
+    const semesterRecords = [];
+    let semesterState = "valid";
+    let semesterWarning = "";
+    if (semestersState.state === "missing") {
+        semesterState = "missing";
+    } else if (!isReadableArrayState(semestersState.state)) {
+        semesterState = "unavailable";
+        semesterWarning = semestersState.message || "Semester data is unavailable; allocated semester names cannot be verified.";
+    } else {
+        const semesterValidation = validateStudentDirectorySemesters(semestersState.records);
+        if (!semesterValidation.success) {
+            semesterState = "unavailable";
+            semesterWarning = `Semester data is invalid. ${semesterValidation.message}`;
+        } else {
+            semesterRecords.push(...semestersState.records);
+        }
+    }
+    const semesterById = new Map(semesterRecords.map((semester) => [semester.id, semester]));
+    const profileByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
+    let missingSemesterReferences = 0;
+
+    for (const user of studentUsers) {
+        const profile = profileByUserId.get(user.id) || null;
+        let semester = null;
+        let rowSemesterState = "unallocated";
+        if (profile && profile.semesterId !== null) {
+            if (semesterState === "unavailable") {
+                rowSemesterState = "unavailable";
+            } else {
+                semester = semesterById.get(profile.semesterId) || null;
+                if (semester) {
+                    rowSemesterState = "valid";
+                } else {
+                    rowSemesterState = "missing-reference";
+                    missingSemesterReferences += 1;
+                }
+            }
+        }
+        studentDirectoryRecords.push({ user, profile, semester, semesterState: rowSemesterState });
+    }
+
+    populateStudentSemesterFilter(semesterRecords, semesterState, studentDirectoryRecords);
+
+    const warnings = [];
+    const profilesWithoutUsers = studentDirectoryRecords.filter((record) => !record.profile).length;
+    if (!profilesConfigured) {
+        warnings.push("Student profiles have not been configured.");
+    }
+    if (profilesWithoutUsers > 0) {
+        warnings.push(`${profilesWithoutUsers} Student account${profilesWithoutUsers === 1 ? " has" : "s have"} no linked profile.`);
+    }
+    if (semesterWarning) warnings.push(semesterWarning);
+    if (missingSemesterReferences > 0) {
+        warnings.push(`${missingSemesterReferences} Student profile${missingSemesterReferences === 1 ? " refers" : "s refer"} to a semester that does not exist.`);
+    }
+
+    studentDirectoryReady = true;
+    setStudentDirectoryMessage(
+        warnings.length > 0
+            ? warnings.join(" ")
+            : `Showing ${profiles.length} validated Student profile${profiles.length === 1 ? "" : "s"}.`,
+        warnings.length > 0 ? "warning" : ""
+    );
+    renderStudentDirectoryRows();
+}
+
+function initializeStudentDirectory() {
+    for (const selector of [
+        "#studentDirectorySearch",
+        "#studentAdmissionFilter",
+        "#studentAuthorizationFilter",
+        "#studentSemesterFilter"
+    ]) {
+        const control = document.querySelector(selector);
+        control.addEventListener(selector === "#studentDirectorySearch" ? "input" : "change", renderStudentDirectoryRows);
+    }
+
+    document.querySelector("#resetStudentFilters").addEventListener("click", () => {
+        document.querySelector("#studentDirectorySearch").value = "";
+        document.querySelector("#studentAdmissionFilter").value = "";
+        document.querySelector("#studentAuthorizationFilter").value = "";
+        document.querySelector("#studentSemesterFilter").value = "";
+        renderStudentDirectoryRows();
+    });
+
+    renderStudentDirectory();
+}
+
 function getDemoSessionMessage(usersState) {
     let savedSession;
 
@@ -2350,3 +2711,4 @@ renderDashboardSummary();
 renderAcademicStructure();
 initializeCourseForm();
 initializeSemesterForm();
+initializeStudentDirectory();
