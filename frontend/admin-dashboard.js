@@ -3,12 +3,16 @@
 const USER_STORAGE_KEY = "learnspaceUsers";
 const STUDENT_STORAGE_KEY = "learnspaceStudents";
 const TEACHER_STORAGE_KEY = "learnspaceTeachers";
+const SEMESTER_STORAGE_KEY = "learnspaceSemesters";
+const CURRICULUM_COURSE_STORAGE_KEY = "learnspaceCurriculumCourses";
 const SESSION_STORAGE_KEY = "learnspaceSession";
 
 const ADMIN_ARRAY_STORAGE_KEYS = new Set([
     USER_STORAGE_KEY,
     STUDENT_STORAGE_KEY,
-    TEACHER_STORAGE_KEY
+    TEACHER_STORAGE_KEY,
+    SEMESTER_STORAGE_KEY,
+    CURRICULUM_COURSE_STORAGE_KEY
 ]);
 const ORIGINAL_RECORD_ID = Symbol("originalRecordId");
 const allowedRoles = new Set(["student", "teacher", "admin"]);
@@ -16,8 +20,8 @@ const allowedAccountStatuses = new Set(["active", "disabled", "pending"]);
 const allowedAdmissionStatuses = new Set(["pending", "admitted", "rejected"]);
 const allowedAuthorizationStatuses = new Set(["pending", "authorized", "revoked"]);
 
-// These helpers are intentionally limited to Admin account/profile storage.
-// Course, offering, and content keys are not accepted by this API.
+// These helpers support Admin accounts, profiles, semesters, and official
+// curriculum. Teacher offerings and their content keys are not accepted here.
 function readArrayFromStorage(key) {
     if (!ADMIN_ARRAY_STORAGE_KEYS.has(key)) {
         return {
@@ -133,6 +137,120 @@ function hasValidCreatedAt(value) {
         !Number.isNaN(Date.parse(value));
 }
 
+function validateCurriculumCourses(courses) {
+    const idValidation = validateRecordIds(courses, "id");
+    if (!idValidation.success) return idValidation;
+
+    const seenCodes = new Set();
+    for (const course of courses) {
+        if (typeof course.code !== "string" || !course.code.trim()) {
+            return { success: false, message: "A curriculum course must have a nonempty code." };
+        }
+
+        if (typeof course.name !== "string" || !course.name.trim()) {
+            return { success: false, message: "A curriculum course must have a nonempty name." };
+        }
+
+        if (typeof course.description !== "string") {
+            return { success: false, message: "A curriculum course description must be text." };
+        }
+
+        if (!hasValidCreatedAt(course.createdAt)) {
+            return { success: false, message: "A curriculum course has an invalid creation timestamp." };
+        }
+
+        const normalizedCode = course.code.trim().toLowerCase();
+        if (seenCodes.has(normalizedCode)) {
+            return { success: false, message: "Curriculum course codes must be unique, ignoring case and surrounding whitespace." };
+        }
+        seenCodes.add(normalizedCode);
+    }
+
+    return { success: true, message: "" };
+}
+
+function validateSemesters(semesters, curriculumCourses = []) {
+    const idValidation = validateRecordIds(semesters, "id");
+    if (!idValidation.success) return idValidation;
+
+    const courseValidation = validateCurriculumCourses(curriculumCourses);
+    if (!courseValidation.success) {
+        return {
+            success: false,
+            message: `Curriculum course data must be valid before semester links can be checked. ${courseValidation.message}`
+        };
+    }
+
+    const curriculumCourseIds = new Set(curriculumCourses.map((course) => course.id));
+    for (const semester of semesters) {
+        if (typeof semester.name !== "string" || !semester.name.trim()) {
+            return { success: false, message: "A semester must have a nonempty name." };
+        }
+
+        if (typeof semester.academicYear !== "string" || !semester.academicYear.trim()) {
+            return { success: false, message: "A semester must have a nonempty academic year." };
+        }
+
+        if (semester.status !== "active" && semester.status !== "inactive") {
+            return { success: false, message: "A semester status must be active or inactive." };
+        }
+
+        if (!Array.isArray(semester.curriculumCourseIds)) {
+            return { success: false, message: "A semester's curriculumCourseIds must be a list." };
+        }
+
+        const seenCourseIds = new Set();
+        for (const courseId of semester.curriculumCourseIds) {
+            if (typeof courseId !== "string" || !courseId.trim()) {
+                return { success: false, message: "Semester curriculum course IDs must be nonempty text values." };
+            }
+
+            if (seenCourseIds.has(courseId)) {
+                return { success: false, message: "A semester cannot contain the same curriculum course more than once." };
+            }
+
+            if (!curriculumCourseIds.has(courseId)) {
+                return { success: false, message: "A semester refers to a curriculum course that does not exist." };
+            }
+
+            seenCourseIds.add(courseId);
+        }
+
+        if (!hasValidCreatedAt(semester.createdAt)) {
+            return { success: false, message: "A semester has an invalid creation timestamp." };
+        }
+    }
+
+    return { success: true, message: "" };
+}
+
+function readCurriculumCoursesForRelationshipValidation() {
+    const courseState = readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+
+    // A missing curriculum collection is an empty read-only snapshot. It is
+    // never created here; semester references will fail validation if present.
+    if (courseState.state === "missing") {
+        return { success: true, courses: [] };
+    }
+
+    if (!isReadableArrayState(courseState.state)) {
+        return {
+            success: false,
+            message: courseState.message || "Curriculum course data is unavailable."
+        };
+    }
+
+    const validation = validateCurriculumCourses(courseState.records);
+    if (!validation.success) {
+        return {
+            success: false,
+            message: `Curriculum course data is invalid. ${validation.message}`
+        };
+    }
+
+    return { success: true, courses: courseState.records };
+}
+
 function validateProfiles(profiles, role, users) {
     if (role !== "student" && role !== "teacher") {
         return { success: false, message: "A profile role must be Student or Teacher." };
@@ -204,7 +322,7 @@ function validateExistingProfilesForUsers(users) {
     return { success: true, message: "" };
 }
 
-function validateCollectionForKey(key, records) {
+function validateCollectionForKey(key, records, relationshipRecords = null) {
     if (key === USER_STORAGE_KEY) {
         const validation = validateUsers(records);
         if (!validation.success) return validation;
@@ -217,6 +335,37 @@ function validateCollectionForKey(key, records) {
             ? "teacher"
             : null;
     if (!role) {
+        if (key === CURRICULUM_COURSE_STORAGE_KEY) {
+            const courseValidation = validateCurriculumCourses(records);
+            if (!courseValidation.success) return courseValidation;
+
+            const semesters = relationshipRecords === null
+                ? readArrayFromStorage(SEMESTER_STORAGE_KEY)
+                : { state: "populated", records: relationshipRecords };
+            if (semesters.state === "missing") return { success: true, message: "" };
+            if (!isReadableArrayState(semesters.state)) {
+                return {
+                    success: false,
+                    message: semesters.message || "Semester data is unavailable, so curriculum relationships could not be checked."
+                };
+            }
+            return validateSemesters(semesters.records, records);
+        }
+
+        if (key === SEMESTER_STORAGE_KEY) {
+            let courses;
+            if (relationshipRecords !== null) {
+                courses = relationshipRecords;
+            } else {
+                const curriculumSnapshot = readCurriculumCoursesForRelationshipValidation();
+                if (!curriculumSnapshot.success) {
+                    return { success: false, message: curriculumSnapshot.message };
+                }
+                courses = curriculumSnapshot.courses;
+            }
+            return validateSemesters(records, courses);
+        }
+
         return { success: false, message: "This storage key is outside the Admin data helper scope." };
     }
 
@@ -226,6 +375,31 @@ function validateCollectionForKey(key, records) {
     }
 
     return validateProfiles(records, role, usersState.records);
+}
+
+function readRelationshipSnapshotForUpdate(key) {
+    if (key === SEMESTER_STORAGE_KEY) {
+        const result = readCurriculumCoursesForRelationshipValidation();
+        return result.success
+            ? { success: true, records: result.courses }
+            : result;
+    }
+
+    if (key === CURRICULUM_COURSE_STORAGE_KEY) {
+        const semesterState = readArrayFromStorage(SEMESTER_STORAGE_KEY);
+        if (semesterState.state === "missing") {
+            return { success: true, records: [] };
+        }
+        if (!isReadableArrayState(semesterState.state)) {
+            return {
+                success: false,
+                message: semesterState.message || "Semester data is unavailable, so curriculum relationships could not be checked."
+            };
+        }
+        return { success: true, records: semesterState.records };
+    }
+
+    return { success: true, records: null };
 }
 
 function getRecordIdField(key) {
@@ -352,7 +526,16 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
         return { success: false, message: snapshot.message || "Saved data is unavailable and was left unchanged." };
     }
 
-    const existingValidation = validateCollectionForKey(key, existingRecords);
+    const relationshipSnapshot = readRelationshipSnapshotForUpdate(key);
+    if (!relationshipSnapshot.success) {
+        return { success: false, message: `Related data cannot be safely checked: ${relationshipSnapshot.message}` };
+    }
+
+    const existingValidation = validateCollectionForKey(
+        key,
+        existingRecords,
+        relationshipSnapshot.records
+    );
     if (!existingValidation.success) {
         return { success: false, message: `Saved data cannot be safely updated: ${existingValidation.message}` };
     }
@@ -391,7 +574,11 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
         return { success: false, message: "The proposed records could not be checked. No data was changed." };
     }
 
-    const proposedValidation = validateCollectionForKey(key, proposedRecords);
+    const proposedValidation = validateCollectionForKey(
+        key,
+        proposedRecords,
+        relationshipSnapshot.records
+    );
     if (!proposedValidation.success) {
         return { success: false, message: `The proposed update is invalid: ${proposedValidation.message} No data was changed.` };
     }
@@ -435,13 +622,15 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
     return { success: true, message: "The record list was saved." };
 }
 
-// Reusable by future Admin workflows. The array-key allowlist prevents these
-// helpers from reading or writing courses, offerings, or course content.
+// Reusable by Admin workflows. The allowlist excludes legacy teacher course
+// offerings and all course-content keys.
 window.LearnSpaceAdminData = Object.freeze({
     readArrayFromStorage,
     validateRecordIds,
     validateUsers,
     validateProfiles,
+    validateSemesters,
+    validateCurriculumCourses,
     updateArrayInStorage
 });
 
