@@ -884,7 +884,7 @@ function getProfileCount(profileKey, role, usersState) {
 
 let studentDirectoryRecords = [];
 let studentDirectoryReady = false;
-const studentAdmissionActionsInFlight = new Set();
+const studentDirectoryActionsInFlight = new Set();
 
 function validateStudentDirectorySemesters(semesters) {
     const idValidation = window.LearnSpaceAdminData.validateRecordIds(semesters, "id");
@@ -986,19 +986,20 @@ function appendDirectoryStatusCell(row, value, statusType = "") {
     row.append(cell);
 }
 
-function createStudentAdmissionActions(record) {
-    const cell = document.createElement("td");
-    if (!record.profile || record.profile.admissionStatus !== "pending") {
-        cell.textContent = "No action available";
-        return cell;
-    }
-
-    const actions = document.createElement("div");
-    const displayName = typeof record.user.name === "string" && record.user.name.trim()
+function getStudentDirectoryDisplayName(record) {
+    return typeof record.user.name === "string" && record.user.name.trim()
         ? record.user.name.trim()
         : record.user.email;
+}
+
+function createStudentAdmissionActions(record, rowActions, displayName) {
+    if (record.profile.admissionStatus !== "pending") return false;
+
+    const actions = document.createElement("div");
     const expectedSnapshot = JSON.stringify(record.profile);
     actions.className = "student-admission-actions";
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `Admission actions for ${displayName}`);
 
     for (const decision of [
         { status: "admitted", label: "Approve", className: "is-approve" },
@@ -1014,12 +1015,69 @@ function createStudentAdmissionActions(record) {
             expectedSnapshot,
             decision.status,
             displayName,
-            actions
+            rowActions
         ));
         actions.append(button);
     }
 
-    cell.append(actions);
+    rowActions.append(actions);
+    return true;
+}
+
+function createStudentAuthorizationActions(record, rowActions, displayName) {
+    const status = record.profile.authorizationStatus;
+    const decisions = status === "pending"
+        ? [
+            { status: "authorized", label: "Authorize", action: "authorize", className: "is-approve" },
+            { status: "revoked", label: "Deny", action: "deny", className: "is-reject" }
+        ]
+        : status === "authorized"
+            ? [{ status: "revoked", label: "Revoke", action: "revoke", className: "is-reject" }]
+            : [{ status: "authorized", label: "Authorize", action: "authorize", className: "is-approve" }];
+
+    const actions = document.createElement("div");
+    const expectedSnapshot = JSON.stringify(record.profile);
+    actions.className = "student-authorization-actions";
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `Authorization actions for ${displayName}`);
+
+    for (const decision of decisions) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `student-admission-button ${decision.className}`;
+        button.textContent = decision.label;
+        button.setAttribute("aria-label", `${decision.label} access for ${displayName}`);
+        button.addEventListener("click", () => handleStudentAuthorizationDecision(
+            record.profile.studentId,
+            expectedSnapshot,
+            status,
+            decision.status,
+            decision.action,
+            displayName,
+            rowActions
+        ));
+        actions.append(button);
+    }
+
+    rowActions.append(actions);
+}
+
+function createStudentActions(record) {
+    const cell = document.createElement("td");
+    if (!record.profile) {
+        cell.textContent = "No action available";
+        return cell;
+    }
+
+    const displayName = getStudentDirectoryDisplayName(record);
+    const rowActions = document.createElement("div");
+    rowActions.className = "student-directory-actions";
+    rowActions.setAttribute("role", "group");
+    rowActions.setAttribute("aria-label", `Actions for ${displayName}`);
+
+    createStudentAdmissionActions(record, rowActions, displayName);
+    createStudentAuthorizationActions(record, rowActions, displayName);
+    cell.append(rowActions);
     return cell;
 }
 
@@ -1034,9 +1092,9 @@ function refreshDirectoryWithAdmissionFeedback(message, state = "error") {
 
 function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus, studentName, actionsElement) {
     if (nextStatus !== "admitted" && nextStatus !== "rejected") return;
-    if (studentAdmissionActionsInFlight.has(studentId)) return;
+    if (studentDirectoryActionsInFlight.has(studentId)) return;
 
-    studentAdmissionActionsInFlight.add(studentId);
+    studentDirectoryActionsInFlight.add(studentId);
     const buttons = actionsElement.querySelectorAll("button");
     buttons.forEach((button) => { button.disabled = true; });
 
@@ -1044,7 +1102,7 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
         `Reject admission for ${studentName}? This changes only admission status. Authorization and semester allocation will be preserved.`
     )) {
         buttons.forEach((button) => { button.disabled = false; });
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
@@ -1056,7 +1114,7 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
         profilesState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
     } catch (error) {
         refreshDirectoryWithAdmissionFeedback("Student data could not be read safely. No changes were made.");
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
@@ -1065,7 +1123,7 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
             ? "Student profile data is no longer available. No changes were made."
             : profilesState.message || usersState.message || "Student or account data is unavailable. No changes were made.";
         refreshDirectoryWithAdmissionFeedback(message);
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
@@ -1077,20 +1135,20 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
         refreshDirectoryWithAdmissionFeedback(
             `Student data is invalid and cannot be updated safely. ${profileValidation.message || usersValidation.message} No changes were made.`
         );
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
     const selectedProfile = profilesState.records.find((profile) => profile.studentId === studentId);
     if (!selectedProfile) {
         refreshDirectoryWithAdmissionFeedback("This Student profile no longer exists. The directory was refreshed.");
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
     if (selectedProfile.admissionStatus !== "pending" ||
         JSON.stringify(selectedProfile) !== expectedSnapshot) {
         refreshDirectoryWithAdmissionFeedback("This Student profile changed or is no longer pending. The directory was refreshed.");
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
@@ -1113,7 +1171,7 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
         );
     } catch (error) {
         refreshDirectoryWithAdmissionFeedback("The admission decision could not be saved safely. Existing data was left unchanged.");
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
@@ -1123,13 +1181,13 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
                 ? updateResult.message
                 : "The admission decision could not be verified. No success was recorded."
         );
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
     if (!admissionUpdated) {
         refreshDirectoryWithAdmissionFeedback("This Student profile changed before the decision was saved. The directory was refreshed.");
-        studentAdmissionActionsInFlight.delete(studentId);
+        studentDirectoryActionsInFlight.delete(studentId);
         return;
     }
 
@@ -1137,7 +1195,123 @@ function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus,
         `Admission ${nextStatus === "admitted" ? "approved" : "rejected"} for ${studentName}. Authorization status and semester allocation were preserved.`,
         ""
     );
-    studentAdmissionActionsInFlight.delete(studentId);
+    studentDirectoryActionsInFlight.delete(studentId);
+}
+
+function handleStudentAuthorizationDecision(
+    studentId,
+    expectedSnapshot,
+    expectedAuthorizationStatus,
+    nextStatus,
+    action,
+    studentName,
+    actionsElement
+) {
+    const permittedTransitions = {
+        pending: new Set(["authorized", "revoked"]),
+        authorized: new Set(["revoked"]),
+        revoked: new Set(["authorized"])
+    };
+    if (!permittedTransitions[expectedAuthorizationStatus]?.has(nextStatus)) return;
+    if (studentDirectoryActionsInFlight.has(studentId)) return;
+
+    studentDirectoryActionsInFlight.add(studentId);
+    const buttons = actionsElement.querySelectorAll("button");
+    buttons.forEach((button) => { button.disabled = true; });
+
+    if (nextStatus === "revoked" && !window.confirm(
+        `${action === "deny" ? "Deny" : "Revoke"} authorization for ${studentName}? This changes only authorization status. Admission status and semester allocation will be preserved.`
+    )) {
+        buttons.forEach((button) => { button.disabled = false; });
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const adminData = window.LearnSpaceAdminData;
+    let usersState;
+    let profilesState;
+    try {
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        profilesState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+    } catch (error) {
+        refreshDirectoryWithAdmissionFeedback("Student data could not be read safely. No changes were made.");
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    if (!isReadableArrayState(usersState.state) || !isReadableArrayState(profilesState.state)) {
+        const message = profilesState.state === "missing"
+            ? "Student profile data is no longer available. No changes were made."
+            : profilesState.message || usersState.message || "Student or account data is unavailable. No changes were made.";
+        refreshDirectoryWithAdmissionFeedback(message);
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const usersValidation = adminData.validateUsers(usersState.records);
+    const profileValidation = usersValidation.success
+        ? adminData.validateProfiles(profilesState.records, "student", usersState.records)
+        : usersValidation;
+    if (!usersValidation.success || !profileValidation.success) {
+        refreshDirectoryWithAdmissionFeedback(
+            `Student data is invalid and cannot be updated safely. ${profileValidation.message || usersValidation.message} No changes were made.`
+        );
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const selectedProfile = profilesState.records.find((profile) => profile.studentId === studentId);
+    if (!selectedProfile || selectedProfile.authorizationStatus !== expectedAuthorizationStatus ||
+        JSON.stringify(selectedProfile) !== expectedSnapshot) {
+        refreshDirectoryWithAdmissionFeedback("This Student profile changed before the authorization decision. The directory was refreshed.");
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    let authorizationUpdated = false;
+    let updateResult;
+    try {
+        updateResult = adminData.updateArrayInStorage(
+            STUDENT_STORAGE_KEY,
+            (draftProfiles) => {
+                const profile = draftProfiles.find((item) => item.studentId === studentId);
+                if (!profile || profile.authorizationStatus !== expectedAuthorizationStatus ||
+                    JSON.stringify(profile) !== expectedSnapshot) {
+                    return draftProfiles;
+                }
+
+                profile.authorizationStatus = nextStatus;
+                authorizationUpdated = true;
+                return draftProfiles;
+            }
+        );
+    } catch (error) {
+        refreshDirectoryWithAdmissionFeedback("The authorization decision could not be saved safely. Existing data was left unchanged.");
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    if (!updateResult || !updateResult.success) {
+        refreshDirectoryWithAdmissionFeedback(
+            updateResult && updateResult.message
+                ? updateResult.message
+                : "The authorization decision could not be verified. No success was recorded."
+        );
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    if (!authorizationUpdated) {
+        refreshDirectoryWithAdmissionFeedback("This Student profile changed before the authorization decision was saved. The directory was refreshed.");
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    refreshDirectoryWithAdmissionFeedback(
+        `Authorization ${nextStatus === "authorized" ? "granted" : action === "deny" ? "denied" : "revoked"} for ${studentName}. Admission status and semester allocation were preserved.`,
+        ""
+    );
+    studentDirectoryActionsInFlight.delete(studentId);
 }
 
 function getStudentDirectoryFilteredRecords() {
@@ -1210,7 +1384,7 @@ function renderStudentDirectoryRows() {
                 appendDirectoryStatusCell(row, "No profile", "warning");
                 appendDirectoryStatusCell(row, "No profile", "warning");
                 appendDirectoryStatusCell(row, "No profile", "warning");
-                row.append(createStudentAdmissionActions(record));
+                row.append(createStudentActions(record));
             } else {
                 appendDirectoryStatusCell(row, record.profile.admissionStatus, record.profile.admissionStatus);
                 appendDirectoryStatusCell(row, record.profile.authorizationStatus, record.profile.authorizationStatus);
@@ -1233,7 +1407,7 @@ function renderStudentDirectoryRows() {
                     }
                 }
                 appendDirectoryStatusCell(row, semesterName, semesterStatus);
-                row.append(createStudentAdmissionActions(record));
+                row.append(createStudentActions(record));
             }
             tbody.append(row);
         }

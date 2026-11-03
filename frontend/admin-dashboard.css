@@ -445,6 +445,18 @@
     min-width: 160px;
 }
 
+.student-directory-actions {
+    display: grid;
+    gap: 8px;
+    min-width: 160px;
+}
+
+.student-authorization-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+
 .student-admission-button {
     min-height: 34px;
     padding: 7px 10px;
