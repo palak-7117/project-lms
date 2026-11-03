@@ -1030,6 +1030,254 @@ function handleDuplicateMembershipRepair(semester, duplicate) {
     );
 }
 
+function readCurrentMappingData() {
+    const adminData = window.LearnSpaceAdminData;
+    let semesterSnapshot;
+    let courseSnapshot;
+    try {
+        semesterSnapshot = adminData.readArrayFromStorage(SEMESTER_STORAGE_KEY);
+        courseSnapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    } catch (error) {
+        return { success: false, message: "Academic data could not be read safely. No changes were made." };
+    }
+
+    if (semesterSnapshot.state === "missing") {
+        return { success: false, message: "Semester storage is not configured. Create a semester before mapping courses." };
+    }
+    if (!isReadableAcademicCollection(semesterSnapshot)) {
+        return { success: false, message: getCollectionStateMessage("Semester", semesterSnapshot) };
+    }
+    if (courseSnapshot.state === "missing") {
+        return { success: false, message: "Curriculum storage is not configured. Create curriculum courses before mapping." };
+    }
+    if (!isReadableAcademicCollection(courseSnapshot)) {
+        return { success: false, message: getCollectionStateMessage("Curriculum", courseSnapshot) };
+    }
+
+    const courseValidation = adminData.validateCurriculumCourses(courseSnapshot.records);
+    if (!courseValidation.success) {
+        return { success: false, message: `Curriculum data is invalid. ${courseValidation.message}` };
+    }
+    const semesterValidation = adminData.validateSemesters(
+        semesterSnapshot.records,
+        courseSnapshot.records
+    );
+    if (!semesterValidation.success) {
+        const duplicates = getDuplicateCurriculumMemberships(
+            semesterSnapshot.records,
+            courseSnapshot.records
+        );
+        return {
+            success: false,
+            message: duplicates.success && duplicates.duplicates.length > 0
+                ? "Resolve duplicate course memberships using the repair controls before normal mapping."
+                : `Semester data is invalid. ${semesterValidation.message}`
+        };
+    }
+
+    return {
+        success: true,
+        semesters: semesterSnapshot.records,
+        courses: courseSnapshot.records
+    };
+}
+
+function verifyExpectedCourseSnapshot(courseId, expectedCourse) {
+    if (!expectedCourse || expectedCourse.id !== courseId) {
+        return { success: false, message: "The selected course is not available in the current course list." };
+    }
+
+    let courseSnapshot;
+    try {
+        courseSnapshot = window.LearnSpaceAdminData.readArrayFromStorage(
+            CURRICULUM_COURSE_STORAGE_KEY
+        );
+    } catch (error) {
+        return { success: false, message: "Curriculum data could not be reread safely." };
+    }
+    if (!isReadableAcademicCollection(courseSnapshot)) {
+        return { success: false, message: getCollectionStateMessage("Curriculum", courseSnapshot) };
+    }
+    const validation = window.LearnSpaceAdminData.validateCurriculumCourses(courseSnapshot.records);
+    if (!validation.success) {
+        return { success: false, message: `Curriculum data is invalid. ${validation.message}` };
+    }
+
+    const currentCourse = courseSnapshot.records.find((course) => course.id === courseId);
+    if (!currentCourse) {
+        return { success: false, message: "The selected curriculum course no longer exists." };
+    }
+    if (!haveSameJsonValue(currentCourse, expectedCourse)) {
+        return { success: false, message: "The selected curriculum course changed. Refresh the semester list and try again." };
+    }
+    return { success: true, course: currentCourse };
+}
+
+function setMappingActionError(message) {
+    setSemesterFormFeedback(message, true);
+    renderAcademicStructure();
+}
+
+function handleSemesterCourseAssignment(semesterSnapshot, courseId, expectedCourse, expectedSemester) {
+    if (typeof courseId !== "string" || !courseId.trim()) {
+        setMappingActionError("Choose an available curriculum course before assigning it.");
+        return;
+    }
+
+    const currentData = readCurrentMappingData();
+    if (!currentData.success) {
+        setMappingActionError(currentData.message);
+        return;
+    }
+    const semester = currentData.semesters.find((record) => record.id === semesterSnapshot.id);
+    if (!semester) {
+        setMappingActionError("This semester no longer exists. Refresh the dashboard before mapping courses.");
+        return;
+    }
+    if (!haveSameJsonValue(semester, expectedSemester)) {
+        setMappingActionError("This semester changed. Refresh the dashboard before mapping courses.");
+        return;
+    }
+    const courseCheck = verifyExpectedCourseSnapshot(courseId, expectedCourse);
+    if (!courseCheck.success) {
+        setMappingActionError(courseCheck.message);
+        return;
+    }
+    if (currentData.semesters.some((record) => record.curriculumCourseIds.includes(courseId))) {
+        setMappingActionError("This course is already assigned to a semester. Refresh the dashboard before continuing.");
+        return;
+    }
+
+    let membershipAdded = false;
+    let callbackFailureMessage = "";
+    let result;
+    try {
+        result = window.LearnSpaceAdminData.updateArrayInStorage(
+            SEMESTER_STORAGE_KEY,
+            (draftRecords) => {
+                const target = draftRecords.find((record) => record.id === semesterSnapshot.id);
+                if (!target || !haveSameJsonValue(target, expectedSemester)) {
+                    callbackFailureMessage = "This semester changed before the course could be assigned.";
+                    return draftRecords;
+                }
+                const latestCourseCheck = verifyExpectedCourseSnapshot(courseId, expectedCourse);
+                if (!latestCourseCheck.success) {
+                    callbackFailureMessage = latestCourseCheck.message;
+                    return draftRecords;
+                }
+                if (draftRecords.some((record) => record.curriculumCourseIds.includes(courseId))) {
+                    callbackFailureMessage = "This course became assigned before the update. Refresh the dashboard and try again.";
+                    return draftRecords;
+                }
+
+                target.curriculumCourseIds.push(courseId);
+                membershipAdded = true;
+                return draftRecords;
+            }
+        );
+    } catch (error) {
+        setMappingActionError("The course could not be assigned safely. Existing data was left unchanged.");
+        return;
+    }
+
+    if (!result || !result.success) {
+        setMappingActionError(
+            result && result.message
+                ? result.message
+                : "The course could not be assigned safely. Existing data was left unchanged."
+        );
+        return;
+    }
+    if (!membershipAdded) {
+        setMappingActionError(
+            callbackFailureMessage || "The course or semester changed before the update. No membership was added."
+        );
+        return;
+    }
+
+    renderAcademicStructure();
+    setSemesterFormFeedback(`Course ${expectedCourse.code} was assigned to ${expectedSemester.name}.`);
+}
+
+function handleSemesterCourseRemoval(semesterSnapshot, course, expectedSemester, expectedCourse) {
+    const courseId = course && course.id;
+    const currentData = readCurrentMappingData();
+    if (!currentData.success) {
+        setMappingActionError(currentData.message);
+        return;
+    }
+
+    const semester = currentData.semesters.find((record) => record.id === semesterSnapshot.id);
+    if (!semester) {
+        setMappingActionError("This semester no longer exists. Refresh the dashboard before removing courses.");
+        return;
+    }
+    if (!haveSameJsonValue(semester, expectedSemester)) {
+        setMappingActionError("This semester changed. Refresh the dashboard before removing courses.");
+        return;
+    }
+    const courseCheck = verifyExpectedCourseSnapshot(courseId, expectedCourse);
+    if (!courseCheck.success) {
+        setMappingActionError(courseCheck.message);
+        return;
+    }
+    if (!semester.curriculumCourseIds.includes(courseId)) {
+        setMappingActionError("This course is no longer assigned to this semester.");
+        return;
+    }
+
+    let membershipRemoved = false;
+    let callbackFailureMessage = "";
+    let result;
+    try {
+        result = window.LearnSpaceAdminData.updateArrayInStorage(
+            SEMESTER_STORAGE_KEY,
+            (draftRecords) => {
+                const target = draftRecords.find((record) => record.id === semesterSnapshot.id);
+                if (!target || !haveSameJsonValue(target, expectedSemester)) {
+                    callbackFailureMessage = "This semester changed before the course could be removed.";
+                    return draftRecords;
+                }
+                const latestCourseCheck = verifyExpectedCourseSnapshot(courseId, expectedCourse);
+                if (!latestCourseCheck.success) {
+                    callbackFailureMessage = latestCourseCheck.message;
+                    return draftRecords;
+                }
+                const membershipIndex = target.curriculumCourseIds.indexOf(courseId);
+                if (membershipIndex < 0 || target.curriculumCourseIds.lastIndexOf(courseId) !== membershipIndex) {
+                    callbackFailureMessage = "This course membership changed before it could be removed.";
+                    return draftRecords;
+                }
+
+                target.curriculumCourseIds.splice(membershipIndex, 1);
+                membershipRemoved = true;
+                return draftRecords;
+            }
+        );
+    } catch (error) {
+        setMappingActionError("The course could not be removed safely. Existing data was left unchanged.");
+        return;
+    }
+
+    if (!result || !result.success) {
+        setMappingActionError(
+            result && result.message
+                ? result.message
+                : "The course could not be removed safely. Existing data was left unchanged."
+        );
+        return;
+    }
+    if (!membershipRemoved) {
+        setMappingActionError(
+            callbackFailureMessage || "The course or semester changed before the update. No membership was removed."
+        );
+        return;
+    }
+
+    renderAcademicStructure();
+    setSemesterFormFeedback(`Course ${expectedCourse.code} was removed from ${expectedSemester.name}.`);
+}
+
 function renderSemesterCards(semesters, courses, listElement, { repairMode = false, duplicateGroups = [] } = {}) {
     const courseById = new Map(courses.map((course) => [course.id, course]));
     const duplicateByCourseId = new Map(duplicateGroups.map((duplicate) => [duplicate.courseId, duplicate]));
@@ -1121,8 +1369,17 @@ function renderSemesterCards(semesters, courses, listElement, { repairMode = fal
                         "aria-label",
                         `Remove ${course.code} — ${course.name} from semester ${semester.name} (${semester.academicYear})`
                     );
-                    membershipAction.disabled = true;
-                    membershipAction.title = "Normal course removal is not enabled yet.";
+                    membershipAction.disabled = repairMode;
+                    if (!repairMode) {
+                        membershipAction.addEventListener("click", () =>
+                            handleSemesterCourseRemoval(
+                                semester,
+                                course,
+                                JSON.parse(JSON.stringify(semester)),
+                                JSON.parse(JSON.stringify(course))
+                            )
+                        );
+                    }
                 }
                 item.append(courseText, membershipAction);
                 includedCourses.append(item);
@@ -1140,15 +1397,17 @@ function renderSemesterCards(semesters, courses, listElement, { repairMode = fal
 
         assignmentPanel.className = "semester-mapping-controls";
         assignmentSelect.id = `semesterCourseSelect${semesterIndex + 1}`;
-        assignmentSelect.disabled = true;
+        const availableCourses = courses.filter((course) => !assignedCourseIds.has(course.id));
+        assignmentSelect.disabled = repairMode || availableCourses.length === 0;
         promptOption.value = "";
-        promptOption.textContent = courses.length > 0
-            ? "Choose an unassigned course"
-            : "No curriculum courses available";
+        promptOption.textContent = courses.length === 0
+            ? "No curriculum courses are configured"
+            : availableCourses.length === 0
+                ? "All curriculum courses are assigned"
+                : "Choose an unassigned course";
         promptOption.selected = true;
         assignmentSelect.append(promptOption);
-        for (const course of courses) {
-            if (assignedCourseIds.has(course.id)) continue;
+        for (const course of availableCourses) {
             const option = document.createElement("option");
             option.value = course.id;
             option.textContent = `${course.code} — ${course.name}`;
@@ -1159,8 +1418,20 @@ function renderSemesterCards(semesters, courses, listElement, { repairMode = fal
         assignButton.type = "button";
         assignButton.className = "course-submit-button mapping-assign-button";
         assignButton.textContent = "Assign Course";
-        assignButton.disabled = true;
+        assignButton.disabled = repairMode || availableCourses.length === 0;
         assignButton.setAttribute("aria-label", `Assign course to semester ${semester.name} (${semester.academicYear})`);
+        if (!repairMode && availableCourses.length > 0) {
+            assignButton.addEventListener("click", () => {
+                const selectedCourseId = assignmentSelect.value;
+                const expectedCourse = availableCourses.find((course) => course.id === selectedCourseId);
+                handleSemesterCourseAssignment(
+                    semester,
+                    selectedCourseId,
+                    expectedCourse,
+                    JSON.parse(JSON.stringify(semester))
+                );
+            });
+        }
         assignmentPanel.append(assignmentLabel, assignmentSelect, assignButton);
 
         card.append(header, details, assignmentPanel);
