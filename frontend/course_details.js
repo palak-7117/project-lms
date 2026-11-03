@@ -23,6 +23,7 @@ let activeAssignment = null;
 let activeCourse = null;
 let selectedSubmissionFiles = [];
 let deadlineTimer = null;
+let studentAccessGranted = false;
 
 // Only a complete success result from the shared evaluator grants access.
 function hasVerifiedStudentAccess() {
@@ -52,8 +53,28 @@ function hasVerifiedStudentAccess() {
     }
 }
 
+function ensureStudentAccess() {
+    if (hasVerifiedStudentAccess()) {
+        studentAccessGranted = true;
+        return true;
+    }
+
+    studentAccessGranted = false;
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
+    if (assignmentDialog.open) {
+        assignmentDialog.close();
+    }
+    showMessage("Your access to this course could not be verified.");
+    return false;
+}
+
 // Read teacher-created courses from localStorage.
 function readTeacherCourses() {
+    if (!ensureStudentAccess()) return [];
+
     try {
         const courses = JSON.parse(
             localStorage.getItem(COURSE_STORAGE_KEY) || "[]"
@@ -67,6 +88,8 @@ function readTeacherCourses() {
 
 // Read a course record without dropping any additional properties.
 function readCourseContent(selectedCourseId) {
+    if (!ensureStudentAccess()) return null;
+
     try {
         const data = JSON.parse(
             localStorage.getItem(
@@ -103,6 +126,8 @@ function readCourseContent(selectedCourseId) {
 
 // Save the record under its existing course-specific key.
 function writeCourseContent(selectedCourseId, content) {
+    if (!ensureStudentAccess()) return false;
+
     try {
         localStorage.setItem(
             `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`,
@@ -201,6 +226,8 @@ function normalizeSubmission(submission) {
 // If a saved review draft is past its due date, submit it automatically.
 // Empty drafts are discarded and never become empty submissions.
 function processAutomaticSubmissions(selectedCourseId, assignments, content) {
+    if (!ensureStudentAccess()) return null;
+
     let changed = false;
     const now = Date.now();
     const assignmentById = new Map(
@@ -247,6 +274,7 @@ function processAutomaticSubmissions(selectedCourseId, assignments, content) {
         });
 
         if (!saved) {
+            if (!studentAccessGranted) return null;
             console.error(
                 "Automatic submission could not be saved. Browser storage may be full."
             );
@@ -310,13 +338,14 @@ function mapTeacherAssignments(assignments, submissions) {
 
 // Find the selected course and adapt teacher data for the student interface.
 function getSelectedCourse() {
-    if (!courseId) return null;
+    if (!ensureStudentAccess() || !courseId) return null;
 
     const teacherCourse = readTeacherCourses()
         .find((item) => String(item.id) === courseId);
 
     if (teacherCourse) {
         let content = readCourseContent(courseId);
+        if (!content) return null;
 
         // Run the deadline check when this course page loads.
         content = processAutomaticSubmissions(
@@ -324,6 +353,7 @@ function getSelectedCourse() {
             content.assignments,
             content
         );
+        if (!content) return null;
 
         // Preserve matching sample attendance records without changing their data.
         // const matchingSample = sampleCourses.find((item) =>
@@ -409,14 +439,17 @@ function getSelectedCourse() {
     return null;
 }
 
-const initialAccessGranted = hasVerifiedStudentAccess();
-if (initialAccessGranted) {
+studentAccessGranted = hasVerifiedStudentAccess();
+if (studentAccessGranted) {
     activeCourse = getSelectedCourse();
 }
 
 // Save or replace this student's submission without overwriting other course data.
 function saveStudentSubmission(assignment, files, status) {
+    if (!ensureStudentAccess()) return null;
+
     const content = readCourseContent(courseId);
+    if (!content) return null;
     const existing = findStudentSubmission(
         content.submissions,
         assignment.id
@@ -454,6 +487,7 @@ function saveStudentSubmission(assignment, files, status) {
     });
 
     if (!saved) {
+        if (!studentAccessGranted) return null;
         throw new Error(
             "Browser storage is full. Remove a file or choose smaller files."
         );
@@ -464,7 +498,10 @@ function saveStudentSubmission(assignment, files, status) {
 
 // Remove a saved review draft when its final file is removed.
 function removeStudentSubmission(assignmentId) {
+    if (!ensureStudentAccess()) return false;
+
     const content = readCourseContent(courseId);
+    if (!content) return false;
     const submissions = content.submissions
         .map(normalizeSubmission)
         .filter((item) =>
@@ -672,6 +709,8 @@ function isValidPdfDataUrl(value) {
 }
 
 function openPdfInNewTab(dataUrl) {
+    if (!ensureStudentAccess()) return;
+
     const bytes = decodePdfDataUrl(dataUrl);
 
     if (!bytes) {
@@ -783,6 +822,11 @@ function renderResources(selectedCourse) {
             if (externalUrl) {
                 action.href = externalUrl;
                 action.textContent = "View resource";
+                action.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    if (!ensureStudentAccess()) return;
+                    window.open(externalUrl, "_blank", "noopener,noreferrer");
+                });
             } else {
                 action.removeAttribute("href");
                 action.setAttribute("aria-disabled", "true");
@@ -921,17 +965,18 @@ function renderQuizzes(selectedCourse) {
 
         if (!isConfiguredFormUrl(quiz.formUrl)) {
             start.addEventListener("click", () => {
+                if (!ensureStudentAccess()) return;
                 feedback.textContent =
                     "Google Forms link has not been configured.";
             });
         } else {
             start.addEventListener("click", () => {
-                 if (!isConfiguredFormUrl(quiz.formUrl)) {
-                feedback.textContent = "A valid Google Forms link is not available yet.";
-                return;
-            }
+                if (!ensureStudentAccess()) return;
+                if (!isConfiguredFormUrl(quiz.formUrl)) {
+                    feedback.textContent = "A valid Google Forms link is not available yet.";
+                    return;
+                }
                 window.open(quiz.formUrl, "_blank", "noopener,noreferrer");
-
             });
         }
 
@@ -1074,7 +1119,7 @@ function renderSubmissionControls() {
 
 // Refresh submission status without discarding files that are still being staged.
 function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
-    if (!activeCourse || !courseId) return;
+    if (!ensureStudentAccess() || !activeCourse || !courseId) return false;
 
     // Keep the current in-progress file list before reading localStorage.
     const stagedFiles = preserveSelectedFiles
@@ -1082,6 +1127,7 @@ function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
         : null;
 
     const content = readCourseContent(courseId);
+    if (!content) return false;
     const assignmentList = activeCourse.teacherManaged
         ? content.assignments
         : (activeCourse.assignments || []);
@@ -1091,6 +1137,7 @@ function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
         assignmentList,
         content
     );
+    if (!updatedContent || !ensureStudentAccess()) return false;
 
     activeCourse.assignments = activeCourse.teacherManaged
         ? mapTeacherAssignments(
@@ -1132,10 +1179,14 @@ function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
 
         renderSubmissionControls();
     }
+
+    return true;
 }
 
 // Remove a selected file. Saved review drafts are updated immediately.
 function removeSubmissionFile(index) {
+    if (!ensureStudentAccess()) return;
+
     if (!activeAssignment || isDeadlinePassed(activeAssignment)) {
         refreshSubmissionState();
         return;
@@ -1158,6 +1209,8 @@ function removeSubmissionFile(index) {
                 )
                 : (removeStudentSubmission(activeAssignment.id), null);
 
+            if (!studentAccessGranted) return;
+
             activeAssignment.submission = saved;
             activeAssignment.status = saved ? "Under review" : "Available";
         } catch (error) {
@@ -1171,9 +1224,9 @@ function removeSubmissionFile(index) {
 
 // Add selected files to the list, validating type and storage limits.
 async function addSelectedFiles(fileList) {
-    if (!activeAssignment) return;
+    if (!ensureStudentAccess() || !activeAssignment) return;
 
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    if (!refreshSubmissionState({ preserveSelectedFiles: true })) return;
 
     if (isDeadlinePassed(activeAssignment) ||
         ["submitted", "auto-submitted"].includes(
@@ -1198,6 +1251,8 @@ async function addSelectedFiles(fileList) {
     const errors = [];
 
     for (const file of files) {
+        if (!ensureStudentAccess()) return;
+
         if (!allowedExtensions.test(file.name)) {
             errors.push(`${file.name}: unsupported file type`);
             continue;
@@ -1215,6 +1270,7 @@ async function addSelectedFiles(fileList) {
 
         try {
             const fileData = await readFileAsDataURL(file);
+            if (!ensureStudentAccess()) return;
 
             addedFiles.push({
                 id: crypto.randomUUID(),
@@ -1226,11 +1282,13 @@ async function addSelectedFiles(fileList) {
 
             totalSize += file.size;
         } catch (error) {
+            if (!ensureStudentAccess()) return;
             console.error("Could not read selected file:", error);
             errors.push(`${file.name}: could not read file`);
         }
     }
 
+    if (!ensureStudentAccess()) return;
     selectedSubmissionFiles.push(...addedFiles);
 
     // If the student already saved a review draft, persist additions immediately.
@@ -1242,6 +1300,7 @@ async function addSelectedFiles(fileList) {
                 selectedSubmissionFiles,
                 "under-review"
             );
+            if (!studentAccessGranted) return;
         } catch (error) {
             errors.push(error.message);
         }
@@ -1259,9 +1318,9 @@ async function addSelectedFiles(fileList) {
 
 // Save the current file list as a private review draft.
 function markSubmissionForReview() {
-    if (!activeAssignment) return;
+    if (!ensureStudentAccess() || !activeAssignment) return;
 
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    if (!refreshSubmissionState({ preserveSelectedFiles: true })) return;
 
     if (isDeadlinePassed(activeAssignment)) {
         renderSubmissionControls();
@@ -1277,6 +1336,7 @@ function markSubmissionForReview() {
     if (!selectedSubmissionFiles.length) {
         if (currentStatus === "under-review") {
             const removed = removeStudentSubmission(activeAssignment.id);
+            if (!studentAccessGranted) return;
             if (removed) {
                 activeAssignment.submission = null;
                 activeAssignment.status = "Available";
@@ -1301,6 +1361,7 @@ function markSubmissionForReview() {
             selectedSubmissionFiles,
             "under-review"
         );
+        if (!studentAccessGranted) return;
         activeAssignment.status = "Under review";
         document.querySelector("#submissionMessage").textContent =
             "Saved for review. The teacher cannot see these files yet.";
@@ -1314,9 +1375,9 @@ function markSubmissionForReview() {
 
 // Submit all current files manually, or respect automatic submission at deadline.
 function markSubmissionComplete() {
-    if (!activeAssignment) return;
+    if (!ensureStudentAccess() || !activeAssignment) return;
 
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    if (!refreshSubmissionState({ preserveSelectedFiles: true })) return;
 
     const status = activeAssignment.submission?.status;
     if (status === "submitted" || status === "auto-submitted") {
@@ -1341,6 +1402,7 @@ function markSubmissionComplete() {
             selectedSubmissionFiles,
             "submitted"
         );
+        if (!studentAccessGranted) return;
         activeAssignment.status = "Submitted";
         document.querySelector("#submissionMessage").textContent =
             "Assignment submitted. Your files are now visible to the teacher.";
@@ -1355,7 +1417,7 @@ function markSubmissionComplete() {
 
 // Open the assignment dialog and restore this student's saved files.
 function openAssignment(assignment) {
-    refreshSubmissionState();
+    if (!ensureStudentAccess() || !refreshSubmissionState()) return;
 
     activeAssignment = activeCourse.assignments.find(
         (item) => item.id === assignment.id
@@ -1406,10 +1468,11 @@ function openAssignment(assignment) {
     document.querySelector("#submissionMessage").textContent = "";
 
     renderSubmissionControls();
+    if (!ensureStudentAccess()) return;
     assignmentDialog.showModal();
 }
 
-if (initialAccessGranted) {
+if (studentAccessGranted) {
     // Wire up the file picker and the two submission options only after access passes.
     document.querySelector("#submissionFile").addEventListener("change", async (event) => {
         const files = Array.from(event.target.files || []);
@@ -1435,6 +1498,8 @@ if (initialAccessGranted) {
 
     courseTabs.forEach((tab) => {
         tab.addEventListener("click", () => {
+            if (!ensureStudentAccess()) return;
+
             courseTabs.forEach((item) => {
                 const isSelected = item === tab;
                 item.classList.toggle("is-active", isSelected);
@@ -1449,8 +1514,9 @@ if (initialAccessGranted) {
 }
 // Recheck deadlines when the student returns to or refocuses the page.
 function refreshPageSubmissionState() {
-    refreshSubmissionState({ preserveSelectedFiles: true });
-    scheduleDeadlineCheck();
+    if (refreshSubmissionState({ preserveSelectedFiles: true })) {
+        scheduleDeadlineCheck();
+    }
 }
 
 function scheduleDeadlineCheck() {
@@ -1459,7 +1525,7 @@ function scheduleDeadlineCheck() {
         deadlineTimer = null;
     }
 
-    if (!activeCourse) return;
+    if (!ensureStudentAccess() || !activeCourse) return;
 
     const upcomingDeadlines = (activeCourse.assignments || [])
         .map(getDeadlineTimestamp)
@@ -1474,12 +1540,13 @@ function scheduleDeadlineCheck() {
     );
 
     deadlineTimer = window.setTimeout(() => {
-        refreshSubmissionState();
-        scheduleDeadlineCheck();
+        if (refreshSubmissionState()) {
+            scheduleDeadlineCheck();
+        }
     }, delay);
 }
 
-if (initialAccessGranted) {
+if (studentAccessGranted) {
     document.addEventListener("visibilitychange", () => {
         if (!document.hidden) {
             refreshPageSubmissionState();
@@ -1489,7 +1556,7 @@ if (initialAccessGranted) {
     window.addEventListener("focus", refreshPageSubmissionState);
 }
 // Load the course, run its initial deadline check, and render its sections.
-if (!initialAccessGranted) {
+if (!studentAccessGranted) {
     showMessage("Your access to this course could not be verified.");
 } else if (!courseId) {
     showMessage("No course was selected.");
