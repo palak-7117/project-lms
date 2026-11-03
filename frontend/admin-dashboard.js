@@ -968,6 +968,114 @@ function renderAcademicStructure() {
     }
 }
 
+function setCourseFormFeedback(message, isError = false) {
+    const feedback = document.querySelector("#courseFormStatus");
+    feedback.textContent = message;
+    feedback.classList.toggle("is-error", isError);
+}
+
+function getCourseCreationStorageError(snapshot) {
+    if (snapshot.state === "malformed-json") {
+        return "Saved curriculum data is malformed JSON. It was left unchanged.";
+    }
+    if (snapshot.state === "non-array") {
+        return "Saved curriculum data is not a list. It was left unchanged.";
+    }
+    if (snapshot.state === "unavailable") {
+        return "Curriculum storage is unavailable. No data was changed.";
+    }
+    return "Curriculum data could not be checked safely. No data was changed.";
+}
+
+function handleAddCourseSubmit(event) {
+    event.preventDefault();
+
+    const form = event.currentTarget;
+    const codeInput = document.querySelector("#courseCode");
+    const nameInput = document.querySelector("#courseName");
+    const descriptionInput = document.querySelector("#courseDescription");
+
+    if (!form.checkValidity()) {
+        setCourseFormFeedback("Enter a course code and course name before adding the course.", true);
+        return;
+    }
+
+    const code = codeInput.value.trim();
+    const name = nameInput.value.trim();
+    const description = descriptionInput.value;
+
+    if (!code || !name) {
+        setCourseFormFeedback("Course code and course name cannot contain only whitespace.", true);
+        return;
+    }
+
+    const adminData = window.LearnSpaceAdminData;
+    let snapshot;
+    try {
+        snapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    } catch (error) {
+        setCourseFormFeedback("Curriculum data could not be read. No data was changed.", true);
+        return;
+    }
+
+    const allowMissing = snapshot.state === "missing";
+    if (!allowMissing && !isReadableAcademicCollection(snapshot)) {
+        setCourseFormFeedback(getCourseCreationStorageError(snapshot), true);
+        return;
+    }
+
+    let courseRecord;
+    try {
+        courseRecord = {
+            id: crypto.randomUUID(),
+            code,
+            name,
+            description,
+            createdAt: new Date().toISOString()
+        };
+    } catch (error) {
+        setCourseFormFeedback("A course ID or creation timestamp could not be generated. No data was changed.", true);
+        return;
+    }
+    const existingCourses = allowMissing ? [] : snapshot.records;
+    const validation = adminData.validateCurriculumCourses([
+        ...existingCourses,
+        courseRecord
+    ]);
+
+    if (!validation.success) {
+        setCourseFormFeedback(validation.message, true);
+        return;
+    }
+
+    let result;
+    try {
+        result = adminData.updateArrayInStorage(
+            CURRICULUM_COURSE_STORAGE_KEY,
+            (draftRecords) => [...draftRecords, courseRecord],
+            { allowMissing }
+        );
+    } catch (error) {
+        setCourseFormFeedback("The course could not be saved safely. Existing data was left unchanged.", true);
+        return;
+    }
+
+    if (!result.success) {
+        setCourseFormFeedback(result.message, true);
+        return;
+    }
+
+    form.reset();
+    setCourseFormFeedback("Course added to the official curriculum.");
+    renderAcademicStructure();
+}
+
+function initializeCourseForm() {
+    const form = document.querySelector("#addCourseForm");
+    form.addEventListener("submit", handleAddCourseSubmit);
+    form.addEventListener("reset", () => setCourseFormFeedback(""));
+}
+
 function renderDashboardSummary() {
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentCount = getProfileCount(STUDENT_STORAGE_KEY, "student", usersState);
@@ -985,3 +1093,4 @@ function renderDashboardSummary() {
 
 renderDashboardSummary();
 renderAcademicStructure();
+initializeCourseForm();

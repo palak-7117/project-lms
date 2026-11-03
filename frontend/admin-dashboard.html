@@ -154,6 +154,40 @@
                 <div class="academic-data-panel">
                     <p class="data-state" id="curriculumViewStatus" role="status"
                        aria-live="polite">Loading curriculum data…</p>
+                    <form class="course-form-panel" id="addCourseForm">
+                        <div class="course-form-heading">
+                            <p class="eyebrow">CURRICULUM SETUP</p>
+                            <h3>Add an official course</h3>
+                            <p>These are curriculum courses. Teacher course offerings remain separate.</p>
+                        </div>
+
+                        <div class="course-form-fields">
+                            <div class="form-field">
+                                <label for="courseCode">Course code <span>(required)</span></label>
+                                <input id="courseCode" name="code" type="text"
+                                       autocomplete="off" required
+                                       aria-describedby="courseCodeHint">
+                                <small id="courseCodeHint">Course codes must be unique.</small>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="courseName">Course name <span>(required)</span></label>
+                                <input id="courseName" name="name" type="text" required>
+                            </div>
+
+                            <div class="form-field form-field-wide">
+                                <label for="courseDescription">Description <span>(optional)</span></label>
+                                <textarea id="courseDescription" name="description" rows="3"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="course-form-actions">
+                            <button class="course-submit-button" type="submit">Add Course</button>
+                            <button class="course-reset-button" type="reset">Clear fields</button>
+                        </div>
+                        <p class="form-feedback" id="courseFormStatus" role="status"
+                           aria-live="polite"></p>
+                    </form>
                     <div class="record-list" id="curriculumList"></div>
                 </div>
             </section>
