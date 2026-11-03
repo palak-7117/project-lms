@@ -194,6 +194,18 @@ button:focus-visible,a:focus-visible,input:focus-visible,textarea:focus-visible 
     gap: 16px
 }
 
+.courses-access-message {
+    grid-column: 1 / -1;
+    margin: 0;
+    padding: 16px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    background: rgba(255,255,255,.54);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6
+}
+
 .course-card {
     position: relative;
     display: flex;

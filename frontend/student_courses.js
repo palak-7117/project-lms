@@ -7,6 +7,66 @@ const TEACHER_COURSES_KEY = "learnspaceCourses";
 
 const courseGrid = document.querySelector("#courseGrid");
 const courseCount = document.querySelector("#courseCount");
+let courses = [];
+let coursesLoaded = false;
+let studentAccessGranted = false;
+let currentAccessDenialCode = "";
+
+function evaluateStudentAccess() {
+    try {
+        const evaluator = window.LearnSpaceStudentAccess;
+        if (!evaluator || typeof evaluator.evaluateStudentAccess !== "function") {
+            return { allowed: false, code: "evaluator_unavailable" };
+        }
+
+        const result = evaluator.evaluateStudentAccess();
+        if (!result || typeof result.allowed !== "boolean") {
+            return { allowed: false, code: "invalid_evaluation" };
+        }
+
+        return result;
+    } catch (error) {
+        return { allowed: false, code: "evaluation_failed" };
+    }
+}
+
+function showAccessDenied(result) {
+    studentAccessGranted = false;
+    coursesLoaded = false;
+    courses = [];
+
+    if (currentAccessDenialCode === result.code && courseGrid.childElementCount === 1) {
+        return;
+    }
+
+    currentAccessDenialCode = result.code || "access_denied";
+    courseGrid.replaceChildren();
+    courseCount.textContent = "Courses unavailable";
+
+    const message = document.createElement("p");
+    message.className = "courses-access-message";
+    message.setAttribute("role", "status");
+    message.textContent = "Course access is not currently available. Please sign in again or contact an administrator.";
+    courseGrid.append(message);
+}
+
+function refreshStudentAccess() {
+    const result = evaluateStudentAccess();
+    if (!result.allowed) {
+        showAccessDenied(result);
+        return false;
+    }
+
+    currentAccessDenialCode = "";
+    if (!studentAccessGranted || !coursesLoaded) {
+        studentAccessGranted = true;
+        courses = loadTeacherCourses();
+        coursesLoaded = true;
+        renderCourses();
+    }
+
+    return true;
+}
 
 function loadTeacherCourses() {
     try {
@@ -36,9 +96,6 @@ function loadTeacherCourses() {
         return [];
     }
 }
-
-const teacherCourses = loadTeacherCourses();
-const courses = teacherCourses;
 
 // Use teacher courses as the only source when available.
 // Otherwise, show the existing sample catalog as a fallback.
@@ -110,6 +167,8 @@ function renderCourses() {
         open.append(openText, arrow);
 
         open.addEventListener("click", () => {
+            if (!refreshStudentAccess()) return;
+
             window.location.href =
                 `course_details.html?course=${encodeURIComponent(course.id)}`;
         });
@@ -122,4 +181,10 @@ function renderCourses() {
         `${courses.length} ${courses.length === 1 ? "course" : "courses"}`;
 }
 
-renderCourses();
+refreshStudentAccess();
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshStudentAccess();
+});
+
+window.addEventListener("focus", refreshStudentAccess);
