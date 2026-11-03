@@ -142,6 +142,35 @@
                 <div class="academic-data-panel">
                     <p class="data-state" id="semesterViewStatus" role="status"
                        aria-live="polite">Loading semester data…</p>
+                    <form class="course-form-panel semester-form-panel" id="addSemesterForm"
+                          aria-labelledby="semesterFormTitle">
+                        <div class="course-form-heading">
+                            <p class="eyebrow">SEMESTER SETUP</p>
+                            <h3 id="semesterFormTitle">Add a semester</h3>
+                            <p>Semester course membership will be managed separately.</p>
+                        </div>
+
+                        <div class="course-form-fields">
+                            <div class="form-field">
+                                <label for="semesterName">Semester name <span>(required)</span></label>
+                                <input id="semesterName" name="name" type="text" required>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="semesterAcademicYear">Academic year <span>(required)</span></label>
+                                <input id="semesterAcademicYear" name="academicYear" type="text" required>
+                            </div>
+                        </div>
+
+                        <div class="course-form-actions">
+                            <button class="course-submit-button" id="addSemesterSubmitButton"
+                                    type="submit">Add Semester</button>
+                            <button class="course-reset-button" id="addSemesterResetButton"
+                                    type="reset">Clear Fields</button>
+                        </div>
+                        <p class="form-feedback" id="semesterFormStatus" role="status"
+                           aria-live="polite"></p>
+                    </form>
                     <div class="record-list" id="semesterList"></div>
                 </div>
             </section>

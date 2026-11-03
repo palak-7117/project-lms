@@ -754,7 +754,7 @@ function renderSemesterCards(semesters, courses, listElement) {
         const details = document.createElement("dl");
         const includedCourses = document.createElement("ul");
 
-        header.className = "record-card-header";
+        header.className = "record-card-header semester-card-header";
         status.className = `status-badge${semester.status === "active" ? " is-active" : ""}`;
         status.textContent = semester.status;
         title.textContent = semester.name;
@@ -1250,6 +1250,21 @@ function initializeCourseForm() {
     );
 }
 
+function initializeSemesterForm() {
+    const form = document.querySelector("#addSemesterForm");
+    const feedback = document.querySelector("#semesterFormStatus");
+
+    form.addEventListener("submit", (event) => {
+        event.preventDefault();
+        feedback.textContent = "Semester creation will be enabled in a later subphase.";
+        feedback.classList.remove("is-error");
+    });
+    form.addEventListener("reset", () => {
+        feedback.textContent = "";
+        feedback.classList.remove("is-error");
+    });
+}
+
 function renderDashboardSummary() {
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentCount = getProfileCount(STUDENT_STORAGE_KEY, "student", usersState);
@@ -1268,3 +1283,4 @@ function renderDashboardSummary() {
 renderDashboardSummary();
 renderAcademicStructure();
 initializeCourseForm();
+initializeSemesterForm();
