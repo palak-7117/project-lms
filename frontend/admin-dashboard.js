@@ -777,6 +777,7 @@ function renderSemesterCards(semesters, courses, listElement) {
         const title = document.createElement("h3");
         const status = document.createElement("span");
         const editButton = document.createElement("button");
+        const statusButton = document.createElement("button");
         const details = document.createElement("dl");
         const includedCourses = document.createElement("ul");
 
@@ -792,7 +793,19 @@ function renderSemesterCards(semesters, courses, listElement) {
             `Edit semester ${semester.name} (${semester.academicYear})`
         );
         editButton.addEventListener("click", () => startSemesterEditing(semester.id));
-        header.append(title, status, editButton);
+        const nextStatus = semester.status === "active" ? "inactive" : "active";
+        const statusAction = nextStatus === "active" ? "Activate" : "Deactivate";
+        statusButton.className = "course-edit-button semester-status-button";
+        statusButton.type = "button";
+        statusButton.textContent = statusAction;
+        statusButton.setAttribute(
+            "aria-label",
+            `${statusAction} semester ${semester.name} (${semester.academicYear})`
+        );
+        statusButton.addEventListener("click", () =>
+            changeSemesterStatus(semester.id, JSON.stringify(semester))
+        );
+        header.append(title, status, editButton, statusButton);
 
         details.className = "record-details";
         addRecordDetail(details, "Academic year", semester.academicYear);
@@ -1361,6 +1374,92 @@ function readSemesterDataForEditing() {
     }
 
     return { success: true, records: semesterSnapshot.records };
+}
+
+function changeSemesterStatus(semesterId, expectedSnapshot) {
+    const readResult = readSemesterDataForEditing();
+    if (!readResult.success) {
+        setSemesterFormFeedback(readResult.message, true);
+        return;
+    }
+
+    const selectedSemester = readResult.records.find((record) => record.id === semesterId);
+    if (!selectedSemester) {
+        setSemesterFormFeedback(
+            "This semester was removed. Refresh the list before changing its status.",
+            true
+        );
+        return;
+    }
+
+    if (JSON.stringify(selectedSemester) !== expectedSnapshot) {
+        setSemesterFormFeedback(
+            "This semester changed elsewhere. Refresh the list before changing its status.",
+            true
+        );
+        return;
+    }
+
+    const nextStatus = selectedSemester.status === "active" ? "inactive" : "active";
+    let selectedSemesterUpdated = false;
+    let updateResult;
+    try {
+        updateResult = window.LearnSpaceAdminData.updateArrayInStorage(
+            SEMESTER_STORAGE_KEY,
+            (draftRecords) => {
+                const semester = draftRecords.find((record) => record.id === semesterId);
+                if (!semester || JSON.stringify(semester) !== expectedSnapshot) {
+                    return draftRecords;
+                }
+
+                semester.status = nextStatus;
+                selectedSemesterUpdated = true;
+                return draftRecords;
+            }
+        );
+    } catch (error) {
+        setSemesterFormFeedback(
+            "The semester status could not be updated safely. Existing data was left unchanged.",
+            true
+        );
+        return;
+    }
+
+    if (!updateResult || !updateResult.success) {
+        setSemesterFormFeedback(
+            updateResult && updateResult.message
+                ? updateResult.message
+                : "The semester status could not be updated safely. Existing data was left unchanged.",
+            true
+        );
+        return;
+    }
+    if (!selectedSemesterUpdated) {
+        setSemesterFormFeedback(
+            "This semester changed or was removed before the status update. Refresh and try again.",
+            true
+        );
+        return;
+    }
+
+    if (selectedSemesterId === semesterId) {
+        selectedSemesterSnapshot = JSON.stringify({
+            ...selectedSemester,
+            status: nextStatus
+        });
+    }
+
+    try {
+        renderAcademicStructure();
+        setSemesterFormFeedback(
+            `Semester ${selectedSemester.name} ${nextStatus === "active" ? "activated" : "deactivated"}.`
+        );
+    } catch (error) {
+        setSemesterFormFeedback(
+            `Semester status was saved, but the list could not refresh. Reload the page to verify it.`,
+            true
+        );
+    }
 }
 
 function startSemesterEditing(semesterId) {
