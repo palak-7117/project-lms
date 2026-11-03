@@ -1,6 +1,14 @@
 "use strict";
 
 const TEACHER_COURSES_KEY = "learnspaceCourses";
+const LEGACY_DEMO_STUDENT_ID = "demo-student";
+const STUDENT_ACCESS_STORAGE_KEYS = new Set([
+    "learnspaceSession",
+    "learnspaceUsers",
+    "learnspaceStudents",
+    "learnspaceCurriculumCourses",
+    "learnspaceSemesters"
+]);
 // const sampleCourses = Array.isArray(window.courseCatalog)
 //     ? window.courseCatalog
 //     : [];
@@ -11,6 +19,9 @@ let courses = [];
 let coursesLoaded = false;
 let studentAccessGranted = false;
 let currentAccessDenialCode = "";
+let verifiedUserId = null;
+let verifiedStudentId = null;
+let identityEstablished = false;
 
 function evaluateStudentAccess() {
     try {
@@ -20,11 +31,22 @@ function evaluateStudentAccess() {
         }
 
         const result = evaluator.evaluateStudentAccess();
-        if (!result || typeof result.allowed !== "boolean") {
+        if (!result || typeof result !== "object" || Array.isArray(result)) {
             return { allowed: false, code: "invalid_evaluation" };
         }
 
-        return result;
+        if (result.allowed === true &&
+            result.code === "access_granted" &&
+            typeof result.userId === "string" && result.userId.trim() !== "" &&
+            typeof result.studentId === "string" &&
+            result.studentId.trim() !== "" &&
+            result.studentId.trim() !== LEGACY_DEMO_STUDENT_ID &&
+            typeof result.semesterId === "string" && result.semesterId.trim() !== "") {
+            return result;
+        }
+
+        if (result.allowed === false) return result;
+        return { allowed: false, code: "invalid_evaluation" };
     } catch (error) {
         return { allowed: false, code: "evaluation_failed" };
     }
@@ -50,15 +72,32 @@ function showAccessDenied(result) {
     courseGrid.append(message);
 }
 
-function refreshStudentAccess() {
+function refreshStudentAccess({ initialLoad = false } = {}) {
     const result = evaluateStudentAccess();
     if (!result.allowed) {
         showAccessDenied(result);
         return false;
     }
 
+    // A page that began without a verified identity must be reloaded to
+    // establish one. Later lifecycle events must never adopt a new session.
+    if (!identityEstablished) {
+        if (!initialLoad) {
+            showAccessDenied({ code: "identity_not_established" });
+            return false;
+        }
+        verifiedUserId = result.userId;
+        verifiedStudentId = result.studentId;
+        identityEstablished = true;
+    } else if (result.userId !== verifiedUserId ||
+        result.studentId !== verifiedStudentId) {
+        showAccessDenied({ code: "identity_changed" });
+        return false;
+    }
+
+    const wasGranted = studentAccessGranted;
     currentAccessDenialCode = "";
-    if (!studentAccessGranted || !coursesLoaded) {
+    if (!wasGranted || !coursesLoaded) {
         studentAccessGranted = true;
         courses = loadTeacherCourses();
         coursesLoaded = true;
@@ -181,10 +220,26 @@ function renderCourses() {
         `${courses.length} ${courses.length === 1 ? "course" : "courses"}`;
 }
 
-refreshStudentAccess();
+refreshStudentAccess({ initialLoad: true });
 
-document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) refreshStudentAccess();
+function isStudentAccessStorageChange(event) {
+    return event.key === null || STUDENT_ACCESS_STORAGE_KEYS.has(event.key);
+}
+
+function handleStudentAccessLifecycleChange() {
+    refreshStudentAccess();
+}
+
+window.addEventListener("storage", (event) => {
+    if (isStudentAccessStorageChange(event)) {
+        handleStudentAccessLifecycleChange();
+    }
 });
 
-window.addEventListener("focus", refreshStudentAccess);
+window.addEventListener("pageshow", handleStudentAccessLifecycleChange);
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) handleStudentAccessLifecycleChange();
+});
+
+window.addEventListener("focus", handleStudentAccessLifecycleChange);

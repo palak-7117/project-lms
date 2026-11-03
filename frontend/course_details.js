@@ -8,6 +8,13 @@ const MAX_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_SUBMISSION_SIZE = 2 * 1024 * 1024;
 
 const LEGACY_DEMO_STUDENT_ID = "demo-student";
+const STUDENT_ACCESS_STORAGE_KEYS = new Set([
+    "learnspaceSession",
+    "learnspaceUsers",
+    "learnspaceStudents",
+    "learnspaceCurriculumCourses",
+    "learnspaceSemesters"
+]);
 // const ATTENDANCE_THRESHOLD = 75; // Example only; not an official rule.
 
 const courseId = new URLSearchParams(window.location.search).get("course");
@@ -24,6 +31,7 @@ let activeCourse = null;
 let selectedSubmissionFiles = [];
 let deadlineTimer = null;
 let studentAccessGranted = false;
+let studentAccessEpoch = 0;
 let courseContentInvalid = false;
 let duplicateSubmissionRecordsDetected = false;
 let courseContentStale = false;
@@ -69,11 +77,14 @@ function getVerifiedStudentAccess() {
 function ensureStudentAccess(expectedStudentId = verifiedStudentId) {
     const currentAccess = getVerifiedStudentAccess();
     if (currentAccess &&
-        (!expectedStudentId || currentAccess.studentId === expectedStudentId)) {
+        verifiedStudentId &&
+        expectedStudentId === verifiedStudentId &&
+        currentAccess.studentId === verifiedStudentId) {
         studentAccessGranted = true;
         return currentAccess;
     }
 
+    if (studentAccessGranted) studentAccessEpoch += 1;
     studentAccessGranted = false;
     if (deadlineTimer !== null) {
         window.clearTimeout(deadlineTimer);
@@ -82,6 +93,8 @@ function ensureStudentAccess(expectedStudentId = verifiedStudentId) {
     if (assignmentDialog.open) {
         assignmentDialog.close();
     }
+    activeAssignment = null;
+    selectedSubmissionFiles = [];
     showMessage("Your access to this course could not be verified.");
     return null;
 }
@@ -1436,6 +1449,11 @@ async function addSelectedFiles(fileList) {
     const operationAccess = ensureStudentAccess();
     if (!operationAccess || !activeAssignment) return;
     const operationStudentId = operationAccess.studentId;
+    const operationAccessEpoch = studentAccessEpoch;
+
+    const operationIsCurrent = () =>
+        operationAccessEpoch === studentAccessEpoch &&
+        Boolean(ensureStudentAccess(operationStudentId));
 
     if (!refreshSubmissionState({
         preserveSelectedFiles: true,
@@ -1465,7 +1483,7 @@ async function addSelectedFiles(fileList) {
     const errors = [];
 
     for (const file of files) {
-        if (!ensureStudentAccess(operationStudentId)) return;
+        if (!operationIsCurrent()) return;
 
         if (!allowedExtensions.test(file.name)) {
             errors.push(`${file.name}: unsupported file type`);
@@ -1484,7 +1502,7 @@ async function addSelectedFiles(fileList) {
 
         try {
             const fileData = await readFileAsDataURL(file);
-            if (!ensureStudentAccess(operationStudentId)) return;
+            if (!operationIsCurrent()) return;
 
             addedFiles.push({
                 id: crypto.randomUUID(),
@@ -1496,13 +1514,13 @@ async function addSelectedFiles(fileList) {
 
             totalSize += file.size;
         } catch (error) {
-            if (!ensureStudentAccess(operationStudentId)) return;
+            if (!operationIsCurrent()) return;
             console.error("Could not read selected file:", error);
             errors.push(`${file.name}: could not read file`);
         }
     }
 
-    if (!ensureStudentAccess(operationStudentId)) return;
+    if (!operationIsCurrent()) return;
     selectedSubmissionFiles.push(...addedFiles);
 
     // If the student already saved a review draft, persist additions immediately.
@@ -1730,6 +1748,35 @@ if (studentAccessGranted) {
 }
 // Recheck deadlines when the student returns to or refocuses the page.
 function refreshPageSubmissionState() {
+    // An initially denied page has no trusted identity to restore. A reload
+    // is required so initialization can establish the new student's identity.
+    if (!verifiedStudentId) return;
+
+    const wasGranted = studentAccessGranted;
+    const access = ensureStudentAccess(verifiedStudentId);
+    if (!access) return;
+
+    if (!wasGranted) {
+        activeCourse = getSelectedCourse();
+        if (!activeCourse) {
+            showMessage(courseContentInvalid
+                ? "Course content could not be verified. Please contact your teacher."
+                : duplicateSubmissionRecordsDetected
+                    ? "Submission records could not be verified. Please contact your teacher."
+                    : "That course could not be found.");
+            return;
+        }
+
+        pageMessage.hidden = true;
+        courseContent.hidden = false;
+        renderOverview(activeCourse);
+        renderResources(activeCourse);
+        renderAssignments(activeCourse);
+        renderQuizzes(activeCourse);
+        scheduleDeadlineCheck();
+        return;
+    }
+
     if (refreshSubmissionState({ preserveSelectedFiles: true })) {
         scheduleDeadlineCheck();
     }
@@ -1754,23 +1801,37 @@ function scheduleDeadlineCheck() {
         Math.max(nextDeadline - Date.now() + 50, 0),
         2147483647
     );
+    const scheduledAccessEpoch = studentAccessEpoch;
 
     deadlineTimer = window.setTimeout(() => {
+        deadlineTimer = null;
+        if (scheduledAccessEpoch !== studentAccessEpoch ||
+            !ensureStudentAccess(verifiedStudentId)) return;
         if (refreshSubmissionState()) {
             scheduleDeadlineCheck();
         }
     }, delay);
 }
 
-if (studentAccessGranted) {
-    document.addEventListener("visibilitychange", () => {
-        if (!document.hidden) {
-            refreshPageSubmissionState();
-        }
-    });
-
-    window.addEventListener("focus", refreshPageSubmissionState);
+function isStudentAccessStorageChange(event) {
+    return event.key === null || STUDENT_ACCESS_STORAGE_KEYS.has(event.key);
 }
+
+function handleStudentAccessLifecycleChange() {
+    refreshPageSubmissionState();
+}
+
+window.addEventListener("storage", (event) => {
+    if (isStudentAccessStorageChange(event)) {
+        handleStudentAccessLifecycleChange();
+    }
+});
+
+window.addEventListener("pageshow", handleStudentAccessLifecycleChange);
+window.addEventListener("focus", handleStudentAccessLifecycleChange);
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) handleStudentAccessLifecycleChange();
+});
 // Load the course, run its initial deadline check, and render its sections.
 if (!studentAccessGranted) {
     showMessage("Your access to this course could not be verified.");
