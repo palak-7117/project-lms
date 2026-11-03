@@ -24,6 +24,7 @@ let activeCourse = null;
 let selectedSubmissionFiles = [];
 let deadlineTimer = null;
 let studentAccessGranted = false;
+let courseContentInvalid = false;
 
 // Only a complete success result from the shared evaluator grants access.
 function hasVerifiedStudentAccess() {
@@ -86,51 +87,145 @@ function readTeacherCourses() {
     }
 }
 
-// Read a course record without dropping any additional properties.
+const COURSE_CONTENT_ARRAY_FIELDS = [
+    "materials",
+    "assignments",
+    "quizzes",
+    "submissions"
+];
+
+function createEmptyCourseContent() {
+    return {
+        materials: [],
+        assignments: [],
+        quizzes: [],
+        submissions: []
+    };
+}
+
+function isValidCourseContent(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+        return false;
+    }
+
+    return COURSE_CONTENT_ARRAY_FIELDS.every((field) =>
+        !Object.prototype.hasOwnProperty.call(data, field) ||
+        (Array.isArray(data[field]) && data[field].every((item) =>
+            item && typeof item === "object" && !Array.isArray(item)
+        ))
+    );
+}
+
+function reportInvalidCourseContent() {
+    courseContentInvalid = true;
+    if (assignmentDialog.open) {
+        assignmentDialog.close();
+    }
+    showMessage(
+        "Course content could not be verified. Please contact your teacher."
+    );
+}
+
+function normalizeCourseContent(data) {
+    return {
+        ...data,
+        materials: Array.isArray(data.materials) ? data.materials : [],
+        assignments: Array.isArray(data.assignments) ? data.assignments : [],
+        quizzes: Array.isArray(data.quizzes) ? data.quizzes : [],
+        submissions: Array.isArray(data.submissions) ? data.submissions : []
+    };
+}
+
+// A missing key represents a new, empty offering-content record. Existing
+// values must parse and have valid collection shapes before they are used.
 function readCourseContent(selectedCourseId) {
     if (!ensureStudentAccess()) return null;
 
+    let rawValue;
     try {
-        const data = JSON.parse(
-            localStorage.getItem(
-                `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`
-            ) || "{}"
+        rawValue = localStorage.getItem(
+            `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`
         );
-
-        if (!data || typeof data !== "object" || Array.isArray(data)) {
-            return {
-                materials: [],
-                assignments: [],
-                quizzes: [],
-                submissions: []
-            };
-        }
-
-        return {
-            ...data,
-            materials: Array.isArray(data.materials) ? data.materials : [],
-            assignments: Array.isArray(data.assignments) ? data.assignments : [],
-            quizzes: Array.isArray(data.quizzes) ? data.quizzes : [],
-            submissions: Array.isArray(data.submissions) ? data.submissions : []
-        };
     } catch (error) {
         console.error("Could not load course content:", error);
-        return {
-            materials: [],
-            assignments: [],
-            quizzes: [],
-            submissions: []
-        };
+        reportInvalidCourseContent();
+        return null;
     }
+
+    if (rawValue === null) {
+        courseContentInvalid = false;
+        return createEmptyCourseContent();
+    }
+
+    let data;
+    try {
+        if (typeof rawValue !== "string") {
+            reportInvalidCourseContent();
+            return null;
+        }
+        data = JSON.parse(rawValue);
+    } catch (error) {
+        console.error("Could not load course content:", error);
+        reportInvalidCourseContent();
+        return null;
+    }
+
+    if (!isValidCourseContent(data)) {
+        reportInvalidCourseContent();
+        return null;
+    }
+
+    courseContentInvalid = false;
+    return normalizeCourseContent(data);
 }
 
 // Save the record under its existing course-specific key.
 function writeCourseContent(selectedCourseId, content) {
     if (!ensureStudentAccess()) return false;
 
+    if (!isValidCourseContent(content)) {
+        reportInvalidCourseContent();
+        return false;
+    }
+
+    const contentKey = `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`;
+    let originalValue;
     try {
+        originalValue = localStorage.getItem(contentKey);
+    } catch (error) {
+        console.error("Could not verify course content before saving:", error);
+        reportInvalidCourseContent();
+        return false;
+    }
+
+    if (originalValue !== null) {
+        let existingContent;
+        try {
+            if (typeof originalValue !== "string") {
+                reportInvalidCourseContent();
+                return false;
+            }
+            existingContent = JSON.parse(originalValue);
+        } catch (error) {
+            console.error("Could not verify course content before saving:", error);
+            reportInvalidCourseContent();
+            return false;
+        }
+
+        if (!isValidCourseContent(existingContent)) {
+            reportInvalidCourseContent();
+            return false;
+        }
+    }
+
+    try {
+        if (localStorage.getItem(contentKey) !== originalValue) {
+            reportInvalidCourseContent();
+            return false;
+        }
+
         localStorage.setItem(
-            `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`,
+            contentKey,
             JSON.stringify(content)
         );
         return true;
@@ -228,6 +323,10 @@ function normalizeSubmission(submission) {
 function processAutomaticSubmissions(selectedCourseId, assignments, content) {
     if (!ensureStudentAccess()) return null;
 
+    const latestContent = readCourseContent(selectedCourseId);
+    if (!latestContent) return null;
+    content = latestContent;
+
     let changed = false;
     const now = Date.now();
     const assignmentById = new Map(
@@ -274,7 +373,7 @@ function processAutomaticSubmissions(selectedCourseId, assignments, content) {
         });
 
         if (!saved) {
-            if (!studentAccessGranted) return null;
+            if (!studentAccessGranted || courseContentInvalid) return null;
             console.error(
                 "Automatic submission could not be saved. Browser storage may be full."
             );
@@ -1561,7 +1660,9 @@ if (!studentAccessGranted) {
 } else if (!courseId) {
     showMessage("No course was selected.");
 } else if (!activeCourse) {
-    showMessage("That course could not be found.");
+    showMessage(courseContentInvalid
+        ? "Course content could not be verified. Please contact your teacher."
+        : "That course could not be found.");
 } else {
     courseContent.hidden = false;
     renderOverview(activeCourse);
