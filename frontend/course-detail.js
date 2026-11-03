@@ -50,6 +50,26 @@ function readStoredContent() {
     }
 }
 
+// Keep the raw value with a parsed snapshot so saves can reject stale data.
+function readStoredContentSnapshot() {
+    try {
+        const rawValue = localStorage.getItem(contentStorageKey());
+        if (rawValue === null) return { rawValue, data: {} };
+        if (typeof rawValue !== "string") return null;
+
+        const data = JSON.parse(rawValue);
+        if (!data || typeof data !== "object" || Array.isArray(data) ||
+            (Object.prototype.hasOwnProperty.call(data, "submissions") &&
+             !Array.isArray(data.submissions))) {
+            return null;
+        }
+        return { rawValue, data };
+    } catch (error) {
+        console.error("Could not verify course content before saving:", error);
+        return null;
+    }
+}
+
 function loadContent() {
     const data = readStoredContent();
 
@@ -68,16 +88,16 @@ let content = courseId
 
 // By default, merge in the latest submissions before saving. This prevents
 // a teacher page left open in another tab from overwriting student submissions.
-function saveContent(useCurrentSubmissions = false) {
+function saveContent() {
     try {
-        const latest = readStoredContent();
+        const snapshot = readStoredContentSnapshot();
+        if (!snapshot) return false;
+        const latest = snapshot.data;
         const latestSubmissions = Array.isArray(latest.submissions)
             ? latest.submissions
             : [];
 
-        const submissions = useCurrentSubmissions
-            ? content.submissions
-            : latestSubmissions;
+        const submissions = latestSubmissions;
 
         const updatedContent = {
             ...latest,
@@ -85,10 +105,10 @@ function saveContent(useCurrentSubmissions = false) {
             submissions
         };
 
-        localStorage.setItem(
-            contentStorageKey(),
-            JSON.stringify(updatedContent)
-        );
+        if (localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
+            return false;
+        }
+        localStorage.setItem(contentStorageKey(), JSON.stringify(updatedContent));
 
         content.submissions = submissions;
         return true;
@@ -192,9 +212,8 @@ function normalizeSubmission(submission) {
 
     return {
         ...submission,
-        id: submission.id || crypto.randomUUID(),
+        id: submission.id,
         courseId: submission.courseId || courseId,
-        studentId: submission.studentId || "demo-student",
         files,
         status,
         submittedAt: submission.submittedAt || null,
@@ -207,53 +226,71 @@ function normalizeSubmission(submission) {
 // Promote saved review drafts after their assignment deadline.
 // Drafts with no files are removed and are never shown as submissions.
 function processAutomaticSubmissions() {
-    const assignments = Array.isArray(content.assignments)
-        ? content.assignments
+    const snapshot = readStoredContentSnapshot();
+    if (!snapshot) return false;
+
+    const latest = snapshot.data;
+    const assignments = Array.isArray(latest.assignments)
+        ? latest.assignments
         : [];
     const assignmentById = new Map(
         assignments.map((assignment) => [assignment.id, assignment])
     );
     let changed = false;
 
-    const submissions = content.submissions
-        .map((item) => {
-            const normalized = normalizeSubmission(item);
-            if (JSON.stringify(item) !== JSON.stringify(normalized)) {
-                changed = true;
-            }
-            return normalized;
-        })
-        .filter((submission) => {
-            if (submission.status === "under-review" &&
-                submission.files.length === 0) {
-                changed = true;
-                return false;
-            }
+    const currentSubmissions = Array.isArray(latest.submissions)
+        ? latest.submissions
+        : [];
+    const submissions = currentSubmissions.flatMap((record) => {
+        const hasKnownStudentId = typeof record.studentId === "string" &&
+            record.studentId.trim() !== "" &&
+            record.studentId.trim() !== "demo-student";
+        if (!hasKnownStudentId) return [record];
 
-            const assignment = assignmentById.get(submission.assignmentId);
-            const deadline = getDeadlineTimestamp(assignment);
+        const submission = normalizeSubmission(record);
+        if (submission.status === "under-review" &&
+            submission.files.length === 0) {
+            changed = true;
+            return [];
+        }
 
-            if (
-                submission.status === "under-review" &&
-                submission.files.length > 0 &&
-                deadline !== null &&
-                Date.now() >= deadline
-            ) {
-                submission.status = "auto-submitted";
-                submission.submittedAt = new Date().toISOString();
-                submission.submissionType = "automatic";
-                changed = true;
-            }
+        const assignment = assignmentById.get(submission.assignmentId);
+        const deadline = getDeadlineTimestamp(assignment);
 
-            return true;
-        });
+        if (
+            submission.status === "under-review" &&
+            submission.files.length > 0 &&
+            deadline !== null &&
+            Date.now() >= deadline
+        ) {
+            changed = true;
+            return [{
+                ...record,
+                status: "auto-submitted",
+                submittedAt: new Date().toISOString(),
+                submissionType: "automatic"
+            }];
+        }
 
-    content.submissions = submissions;
+        return [record];
+    });
 
     if (changed) {
-        // Write the updated status records while preserving all course data.
-        saveContent(true);
+        try {
+            if (localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
+                return false;
+            }
+            localStorage.setItem(contentStorageKey(), JSON.stringify({
+                ...latest,
+                submissions
+            }));
+        } catch (error) {
+            console.error("Could not save automatic submission updates:", error);
+            return false;
+        }
     }
+
+    content.submissions = submissions;
 
     return changed;
 }
@@ -701,9 +738,14 @@ function renderAssignmentSubmissions(assignment) {
     submissions.forEach((submission) => {
         const automatic = submission.status === "auto-submitted";
         const submittedAt = submission.submittedAt || submission.uploadedAt;
+        const studentLabel = typeof submission.studentId === "string" &&
+            submission.studentId.trim() !== "" &&
+            submission.studentId.trim() !== "demo-student"
+            ? submission.studentId
+            : "Unknown student";
 
         const submissionCard = makeCard(
-            `Student: ${submission.studentId || "Unknown student"}`,
+            `Student: ${studentLabel}`,
             `Assignment: ${assignment.title}`,
             [
                 automatic ? "Automatically submitted" : "Manually submitted",
