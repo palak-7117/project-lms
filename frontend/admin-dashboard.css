@@ -285,6 +285,134 @@
     line-height: 1.65;
 }
 
+.academic-data-panel {
+    min-width: 0;
+}
+
+.data-state {
+    margin: 0 0 14px;
+    padding: 12px 15px;
+    border: 1px solid var(--border, rgba(86, 98, 70, 0.2));
+    border-radius: 6px;
+    background: rgba(255, 254, 250, 0.72);
+    color: var(--muted-ink, #74776D);
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.data-state:empty {
+    display: none;
+}
+
+.data-state.is-error {
+    border-color: rgba(153, 104, 54, 0.35);
+    background: rgba(226, 193, 145, 0.2);
+    color: var(--ink, #34382F);
+}
+
+.record-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: 14px;
+}
+
+.record-card {
+    min-width: 0;
+    padding: 19px;
+    border: 1px solid var(--border, rgba(86, 98, 70, 0.2));
+    border-radius: var(--radius-card, 8px);
+    background-color: rgba(255, 254, 250, 0.8);
+    background-image: var(--paper-warm, url("assets/images/paper-warm.png"));
+    box-shadow: 0 8px 22px rgba(57, 58, 44, 0.045);
+}
+
+.record-card-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+}
+
+.record-card h3 {
+    min-width: 0;
+    margin: 0;
+    color: var(--ink, #34382F);
+    font: 400 20px/1.3 Georgia, "Times New Roman", serif;
+    overflow-wrap: anywhere;
+}
+
+.course-code {
+    display: inline-block;
+    max-width: 100%;
+    margin-bottom: 8px;
+    color: var(--olive, #566246);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    overflow-wrap: anywhere;
+}
+
+.status-badge {
+    flex: 0 0 auto;
+    padding: 5px 9px;
+    border: 1px solid var(--border, rgba(86, 98, 70, 0.2));
+    border-radius: 999px;
+    color: var(--muted-ink, #74776D);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: capitalize;
+}
+
+.status-badge.is-active {
+    border-color: rgba(86, 98, 70, 0.3);
+    background: rgba(164, 194, 165, 0.2);
+    color: var(--olive, #566246);
+}
+
+.record-details {
+    display: grid;
+    gap: 12px;
+    margin: 0;
+}
+
+.record-details > div {
+    min-width: 0;
+}
+
+.record-details dt {
+    margin-bottom: 4px;
+    color: var(--muted-ink, #74776D);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.record-details dd {
+    margin: 0;
+    color: var(--ink, #34382F);
+    font-size: 13px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
+.relationship-list {
+    display: grid;
+    gap: 5px;
+    margin: 0;
+    padding-left: 18px;
+    color: var(--ink, #34382F);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.relationship-list li {
+    overflow-wrap: anywhere;
+}
+
 .admin-footer {
     display: flex;
     justify-content: space-between;

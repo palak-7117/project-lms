@@ -139,16 +139,10 @@
                     <p class="eyebrow">ACADEMIC STRUCTURE</p>
                     <h2 id="semestersTitle">Semesters</h2>
                 </div>
-                <div class="placeholder-panel">
-                    <span class="section-symbol" aria-hidden="true">◷</span>
-                    <div>
-                        <h3>Semester management is not configured.</h3>
-                        <p>
-                            Creating, activating, and deactivating semesters will be
-                            added in a later phase. No semester records have been
-                            created by this page.
-                        </p>
-                    </div>
+                <div class="academic-data-panel">
+                    <p class="data-state" id="semesterViewStatus" role="status"
+                       aria-live="polite">Loading semester data…</p>
+                    <div class="record-list" id="semesterList"></div>
                 </div>
             </section>
 
@@ -157,16 +151,10 @@
                     <p class="eyebrow">ACADEMIC STRUCTURE</p>
                     <h2 id="curriculumTitle">Curriculum</h2>
                 </div>
-                <div class="placeholder-panel">
-                    <span class="section-symbol" aria-hidden="true">⌘</span>
-                    <div>
-                        <h3>Official curriculum is not configured.</h3>
-                        <p>
-                            Curriculum courses and semester membership will be
-                            managed here in a later phase. Teacher-created course
-                            offerings remain separate and are not shown as curriculum.
-                        </p>
-                    </div>
+                <div class="academic-data-panel">
+                    <p class="data-state" id="curriculumViewStatus" role="status"
+                       aria-live="polite">Loading curriculum data…</p>
+                    <div class="record-list" id="curriculumList"></div>
                 </div>
             </section>
 

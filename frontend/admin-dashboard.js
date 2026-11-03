@@ -697,6 +697,277 @@ function getDemoSessionMessage(usersState) {
     return `Demo Admin session found for ${adminLabel}. This is only a local indicator, not secure authentication.`;
 }
 
+function isReadableAcademicCollection(snapshot) {
+    return snapshot.state === "empty" || snapshot.state === "populated";
+}
+
+function getCollectionStateMessage(label, snapshot) {
+    if (snapshot.state === "missing") {
+        return label === "Curriculum"
+            ? "Curriculum has not been configured yet."
+            : "Semesters have not been configured yet.";
+    }
+    if (snapshot.state === "malformed-json") {
+        return `Saved ${label.toLowerCase()} data is malformed JSON. It has not been changed.`;
+    }
+    if (snapshot.state === "non-array") {
+        return `Saved ${label.toLowerCase()} data is not a list. It has not been changed.`;
+    }
+    if (snapshot.state === "unavailable") {
+        return `${label} data is unavailable in browser storage.`;
+    }
+    return `${label} data could not be read.`;
+}
+
+function setAcademicViewState(statusElement, listElement, message, isError = false) {
+    statusElement.textContent = message;
+    statusElement.classList.toggle("is-error", isError);
+    listElement.replaceChildren();
+}
+
+function addRecordDetail(details, label, value) {
+    const row = document.createElement("div");
+    const term = document.createElement("dt");
+    const description = document.createElement("dd");
+    term.textContent = label;
+    description.textContent = value;
+    row.append(term, description);
+    details.append(row);
+}
+
+function createRecordCard() {
+    const card = document.createElement("article");
+    card.className = "record-card";
+    return card;
+}
+
+function renderSemesterCards(semesters, courses, listElement) {
+    const courseById = new Map(courses.map((course) => [course.id, course]));
+
+    for (const semester of semesters) {
+        const card = createRecordCard();
+        const header = document.createElement("div");
+        const title = document.createElement("h3");
+        const status = document.createElement("span");
+        const details = document.createElement("dl");
+        const includedCourses = document.createElement("ul");
+
+        header.className = "record-card-header";
+        status.className = `status-badge${semester.status === "active" ? " is-active" : ""}`;
+        status.textContent = semester.status;
+        title.textContent = semester.name;
+        header.append(title, status);
+
+        details.className = "record-details";
+        addRecordDetail(details, "Academic year", semester.academicYear);
+        addRecordDetail(
+            details,
+            "Curriculum courses",
+            String(semester.curriculumCourseIds.length)
+        );
+
+        const courseRow = document.createElement("div");
+        const courseLabel = document.createElement("dt");
+        const courseDescription = document.createElement("dd");
+        courseLabel.textContent = "Included courses";
+        includedCourses.className = "relationship-list";
+
+        if (semester.curriculumCourseIds.length === 0) {
+            courseDescription.textContent = "No curriculum courses are included.";
+        } else {
+            for (const courseId of semester.curriculumCourseIds) {
+                const course = courseById.get(courseId);
+                const item = document.createElement("li");
+                item.textContent = `${course.code} — ${course.name}`;
+                includedCourses.append(item);
+            }
+            courseDescription.append(includedCourses);
+        }
+
+        courseRow.append(courseLabel, courseDescription);
+        details.append(courseRow);
+        card.append(header, details);
+        listElement.append(card);
+    }
+}
+
+function renderCurriculumCards(
+    courses,
+    semesters,
+    membershipVerified,
+    semesterCollectionState,
+    listElement
+) {
+    for (const course of courses) {
+        const card = createRecordCard();
+        const code = document.createElement("span");
+        const title = document.createElement("h3");
+        const details = document.createElement("dl");
+        const membershipRow = document.createElement("div");
+        const membershipLabel = document.createElement("dt");
+        const membershipDescription = document.createElement("dd");
+
+        code.className = "course-code";
+        code.textContent = course.code;
+        title.textContent = course.name;
+        details.className = "record-details";
+        addRecordDetail(
+            details,
+            "Description",
+            course.description.trim() || "No description provided."
+        );
+
+        membershipLabel.textContent = "Included in semesters";
+        if (!membershipVerified) {
+            membershipDescription.textContent = "Semester membership could not be verified.";
+        } else {
+            const memberships = semesters.filter((semester) =>
+                semester.curriculumCourseIds.includes(course.id)
+            );
+
+            if (memberships.length === 0) {
+                membershipDescription.textContent = semesterCollectionState === "missing"
+                    ? "Semester membership has not been configured yet."
+                    : "Not included in any configured semester.";
+            } else {
+                const membershipList = document.createElement("ul");
+                membershipList.className = "relationship-list";
+                for (const semester of memberships) {
+                    const item = document.createElement("li");
+                    item.textContent = `${semester.name} (${semester.academicYear})`;
+                    membershipList.append(item);
+                }
+                membershipDescription.append(membershipList);
+            }
+        }
+
+        membershipRow.append(membershipLabel, membershipDescription);
+        details.append(membershipRow);
+        card.append(code, title, details);
+        listElement.append(card);
+    }
+}
+
+function renderAcademicStructure() {
+    const adminData = window.LearnSpaceAdminData;
+    const semesterStatus = document.querySelector("#semesterViewStatus");
+    const semesterList = document.querySelector("#semesterList");
+    const curriculumStatus = document.querySelector("#curriculumViewStatus");
+    const curriculumList = document.querySelector("#curriculumList");
+    let semesterSnapshot;
+    let courseSnapshot;
+
+    try {
+        semesterSnapshot = adminData.readArrayFromStorage(SEMESTER_STORAGE_KEY);
+        courseSnapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    } catch (error) {
+        setAcademicViewState(
+            semesterStatus,
+            semesterList,
+            "Semester data could not be read safely.",
+            true
+        );
+        setAcademicViewState(
+            curriculumStatus,
+            curriculumList,
+            "Curriculum data could not be read safely.",
+            true
+        );
+        return;
+    }
+
+    const coursesReadable = isReadableAcademicCollection(courseSnapshot);
+    const semestersReadable = isReadableAcademicCollection(semesterSnapshot);
+    const courseValidation = coursesReadable
+        ? adminData.validateCurriculumCourses(courseSnapshot.records)
+        : { success: courseSnapshot.state === "missing", message: "" };
+    const courses = coursesReadable && courseValidation.success
+        ? courseSnapshot.records
+        : [];
+    const curriculumUsable = courseSnapshot.state === "missing" ||
+        (coursesReadable && courseValidation.success);
+
+    let semesterValidation = { success: false, message: "" };
+    if (semestersReadable && curriculumUsable) {
+        semesterValidation = adminData.validateSemesters(
+            semesterSnapshot.records,
+            courses
+        );
+    }
+    const semesterRelationshipsVerified =
+        semesterSnapshot.state === "missing" ||
+        (semestersReadable && curriculumUsable && semesterValidation.success);
+
+    if (semesterSnapshot.state === "missing") {
+        setAcademicViewState(
+            semesterStatus,
+            semesterList,
+            getCollectionStateMessage("Semesters", semesterSnapshot)
+        );
+    } else if (!semestersReadable) {
+        setAcademicViewState(
+            semesterStatus,
+            semesterList,
+            getCollectionStateMessage("Semester", semesterSnapshot),
+            true
+        );
+    } else if (!curriculumUsable) {
+        setAcademicViewState(
+            semesterStatus,
+            semesterList,
+            "Semester records are not shown because curriculum data is invalid or unavailable, so course links cannot be verified.",
+            true
+        );
+    } else if (!semesterValidation.success) {
+        setAcademicViewState(
+            semesterStatus,
+            semesterList,
+            `Semester records could not be displayed: ${semesterValidation.message}`,
+            true
+        );
+    } else if (semesterSnapshot.state === "empty") {
+        setAcademicViewState(semesterStatus, semesterList, "No semesters have been created yet.");
+    } else {
+        semesterStatus.textContent = `Showing ${semesterSnapshot.records.length} semester${semesterSnapshot.records.length === 1 ? "" : "s"}.`;
+        semesterStatus.classList.remove("is-error");
+        semesterList.replaceChildren();
+        renderSemesterCards(semesterSnapshot.records, courses, semesterList);
+    }
+
+    if (!coursesReadable) {
+        setAcademicViewState(
+            curriculumStatus,
+            curriculumList,
+            getCollectionStateMessage("Curriculum", courseSnapshot),
+            courseSnapshot.state !== "missing"
+        );
+    } else if (!courseValidation.success) {
+        setAcademicViewState(
+            curriculumStatus,
+            curriculumList,
+            `Curriculum records could not be displayed: ${courseValidation.message}`,
+            true
+        );
+    } else if (courseSnapshot.state === "empty") {
+        setAcademicViewState(curriculumStatus, curriculumList, "No curriculum courses have been created yet.");
+    } else {
+        curriculumStatus.textContent = semesterRelationshipsVerified
+            ? `Showing ${courses.length} curriculum course${courses.length === 1 ? "" : "s"}.`
+            : "Course details are valid, but semester membership could not be verified.";
+        curriculumStatus.classList.toggle("is-error", !semesterRelationshipsVerified);
+        curriculumList.replaceChildren();
+        renderCurriculumCards(
+            courses,
+            semesterRelationshipsVerified && semestersReadable
+                ? semesterSnapshot.records
+                : [],
+            semesterRelationshipsVerified,
+            semesterSnapshot.state,
+            curriculumList
+        );
+    }
+}
+
 function renderDashboardSummary() {
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentCount = getProfileCount(STUDENT_STORAGE_KEY, "student", usersState);
@@ -713,3 +984,4 @@ function renderDashboardSummary() {
 }
 
 renderDashboardSummary();
+renderAcademicStructure();
