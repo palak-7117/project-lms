@@ -951,6 +951,7 @@ function getCollectionStateMessage(label, snapshot) {
 function setAcademicViewState(statusElement, listElement, message, isError = false) {
     statusElement.textContent = message;
     statusElement.classList.toggle("is-error", isError);
+    statusElement.classList.remove("is-warning");
     listElement.replaceChildren();
 }
 
@@ -970,10 +971,75 @@ function createRecordCard() {
     return card;
 }
 
-function renderSemesterCards(semesters, courses, listElement) {
-    const courseById = new Map(courses.map((course) => [course.id, course]));
+function renderDuplicateMappingWarning(duplicateGroups, listElement) {
+    const warning = document.createElement("div");
+    const title = document.createElement("h3");
+    const description = document.createElement("p");
+    const duplicateList = document.createElement("ul");
 
-    for (const semester of semesters) {
+    warning.className = "mapping-repair-warning";
+    title.textContent = "Curriculum mappings need repair";
+    description.textContent =
+        "Each course must belong to one semester. Choose the specific membership to remove; no semester will be selected automatically.";
+    duplicateList.className = "mapping-repair-summary-list";
+
+    for (const duplicate of duplicateGroups) {
+        const item = document.createElement("li");
+        const membershipNames = duplicate.semesters.map((semester) =>
+            `${semester.semesterName} (${semester.academicYear})`
+        );
+        item.textContent = `${duplicate.courseCode} — ${duplicate.courseName}: ${duplicate.membershipCount} memberships in ${membershipNames.join(", ")}.`;
+        duplicateList.append(item);
+    }
+
+    warning.append(title, description, duplicateList);
+    listElement.append(warning);
+}
+
+function handleDuplicateMembershipRepair(semester, duplicate) {
+    let result;
+    try {
+        result = repairDuplicateSemesterMembership(
+            semester.id,
+            duplicate.courseId,
+            JSON.parse(JSON.stringify(semester)),
+            duplicate.semesters.map((membership) => membership.semesterId)
+        );
+    } catch (error) {
+        setSemesterFormFeedback(
+            "The duplicate membership could not be repaired safely. Refresh the semester list and try again.",
+            true
+        );
+        return;
+    }
+
+    if (!result || !result.success) {
+        setSemesterFormFeedback(
+            result && result.message
+                ? result.message
+                : "The duplicate membership could not be repaired safely.",
+            true
+        );
+        renderAcademicStructure();
+        return;
+    }
+
+    renderAcademicStructure();
+    setSemesterFormFeedback(
+        `Removed ${duplicate.courseCode} from ${semester.name}. Review the remaining semester memberships.`
+    );
+}
+
+function renderSemesterCards(semesters, courses, listElement, { repairMode = false, duplicateGroups = [] } = {}) {
+    const courseById = new Map(courses.map((course) => [course.id, course]));
+    const duplicateByCourseId = new Map(duplicateGroups.map((duplicate) => [duplicate.courseId, duplicate]));
+    const assignedCourseIds = new Set(
+        semesters.flatMap((semester) => semester.curriculumCourseIds)
+    );
+
+    if (repairMode) renderDuplicateMappingWarning(duplicateGroups, listElement);
+
+    for (const [semesterIndex, semester] of semesters.entries()) {
         const card = createRecordCard();
         const header = document.createElement("div");
         const title = document.createElement("h3");
@@ -990,6 +1056,7 @@ function renderSemesterCards(semesters, courses, listElement) {
         editButton.className = "course-edit-button";
         editButton.type = "button";
         editButton.textContent = "Edit";
+        editButton.disabled = repairMode;
         editButton.setAttribute(
             "aria-label",
             `Edit semester ${semester.name} (${semester.academicYear})`
@@ -1000,6 +1067,7 @@ function renderSemesterCards(semesters, courses, listElement) {
         statusButton.className = "course-edit-button semester-status-button";
         statusButton.type = "button";
         statusButton.textContent = statusAction;
+        statusButton.disabled = repairMode;
         statusButton.setAttribute(
             "aria-label",
             `${statusAction} semester ${semester.name} (${semester.academicYear})`
@@ -1029,7 +1097,34 @@ function renderSemesterCards(semesters, courses, listElement) {
             for (const courseId of semester.curriculumCourseIds) {
                 const course = courseById.get(courseId);
                 const item = document.createElement("li");
-                item.textContent = `${course.code} — ${course.name}`;
+                const courseText = document.createElement("span");
+                const membershipAction = document.createElement("button");
+                const duplicate = duplicateByCourseId.get(courseId);
+
+                item.className = "mapping-course-item";
+                courseText.textContent = `${course.code} — ${course.name}`;
+                membershipAction.type = "button";
+                membershipAction.className = duplicate
+                    ? "course-edit-button mapping-membership-action mapping-repair-action"
+                    : "course-edit-button mapping-membership-action";
+                membershipAction.textContent = duplicate ? "Repair: remove" : "Remove";
+                if (duplicate) {
+                    membershipAction.setAttribute(
+                        "aria-label",
+                        `Repair duplicate: remove ${course.code} — ${course.name} from semester ${semester.name} (${semester.academicYear})`
+                    );
+                    membershipAction.addEventListener("click", () =>
+                        handleDuplicateMembershipRepair(semester, duplicate)
+                    );
+                } else {
+                    membershipAction.setAttribute(
+                        "aria-label",
+                        `Remove ${course.code} — ${course.name} from semester ${semester.name} (${semester.academicYear})`
+                    );
+                    membershipAction.disabled = true;
+                    membershipAction.title = "Normal course removal is not enabled yet.";
+                }
+                item.append(courseText, membershipAction);
                 includedCourses.append(item);
             }
             courseDescription.append(includedCourses);
@@ -1037,7 +1132,38 @@ function renderSemesterCards(semesters, courses, listElement) {
 
         courseRow.append(courseLabel, courseDescription);
         details.append(courseRow);
-        card.append(header, details);
+        const assignmentPanel = document.createElement("div");
+        const assignmentLabel = document.createElement("label");
+        const assignmentSelect = document.createElement("select");
+        const promptOption = document.createElement("option");
+        const assignButton = document.createElement("button");
+
+        assignmentPanel.className = "semester-mapping-controls";
+        assignmentSelect.id = `semesterCourseSelect${semesterIndex + 1}`;
+        assignmentSelect.disabled = true;
+        promptOption.value = "";
+        promptOption.textContent = courses.length > 0
+            ? "Choose an unassigned course"
+            : "No curriculum courses available";
+        promptOption.selected = true;
+        assignmentSelect.append(promptOption);
+        for (const course of courses) {
+            if (assignedCourseIds.has(course.id)) continue;
+            const option = document.createElement("option");
+            option.value = course.id;
+            option.textContent = `${course.code} — ${course.name}`;
+            assignmentSelect.append(option);
+        }
+        assignmentLabel.htmlFor = assignmentSelect.id;
+        assignmentLabel.textContent = `Course to assign to ${semester.name}`;
+        assignButton.type = "button";
+        assignButton.className = "course-submit-button mapping-assign-button";
+        assignButton.textContent = "Assign Course";
+        assignButton.disabled = true;
+        assignButton.setAttribute("aria-label", `Assign course to semester ${semester.name} (${semester.academicYear})`);
+        assignmentPanel.append(assignmentLabel, assignmentSelect, assignButton);
+
+        card.append(header, details, assignmentPanel);
         listElement.append(card);
     }
 }
@@ -1047,7 +1173,8 @@ function renderCurriculumCards(
     semesters,
     membershipVerified,
     semesterCollectionState,
-    listElement
+    listElement,
+    disableManagement = false
 ) {
     for (const course of courses) {
         const card = createRecordCard();
@@ -1065,6 +1192,7 @@ function renderCurriculumCards(
         editButton.className = "course-edit-button";
         editButton.type = "button";
         editButton.textContent = "Edit";
+        editButton.disabled = disableManagement;
         editButton.setAttribute("aria-label", `Edit ${course.code} — ${course.name}`);
         editButton.addEventListener("click", () => startCourseEditing(course.id));
         header.className = "record-card-header";
@@ -1108,7 +1236,18 @@ function renderCurriculumCards(
     }
 }
 
+function setAcademicManagementControlsDisabled(disabled) {
+    for (const selector of ["#addSemesterForm", "#addCourseForm"]) {
+        const form = document.querySelector(selector);
+        if (!form) continue;
+        for (const control of form.querySelectorAll("input, textarea, button")) {
+            control.disabled = disabled;
+        }
+    }
+}
+
 function renderAcademicStructure() {
+    setAcademicManagementControlsDisabled(false);
     const adminData = window.LearnSpaceAdminData;
     const semesterStatus = document.querySelector("#semesterViewStatus");
     const semesterList = document.querySelector("#semesterList");
@@ -1154,9 +1293,16 @@ function renderAcademicStructure() {
             courses
         );
     }
+    const duplicateInspection = semestersReadable && curriculumUsable
+        ? getDuplicateCurriculumMemberships(semesterSnapshot.records, courses)
+        : { success: false, message: "", duplicates: [] };
+    const duplicateRepairMode = !semesterValidation.success &&
+        duplicateInspection.success && duplicateInspection.duplicates.length > 0;
+    if (duplicateRepairMode) setAcademicManagementControlsDisabled(true);
     const semesterRelationshipsVerified =
         semesterSnapshot.state === "missing" ||
-        (semestersReadable && curriculumUsable && semesterValidation.success);
+        (semestersReadable && curriculumUsable &&
+            (semesterValidation.success || duplicateRepairMode));
     const semesterSummaryCount = document.querySelector("#semesterSummaryCount");
 
     if (semesterSnapshot.state === "missing") {
@@ -1188,17 +1334,30 @@ function renderAcademicStructure() {
             true
         );
     } else if (!semesterValidation.success) {
-        setAcademicViewState(
-            semesterStatus,
-            semesterList,
-            `Semester records could not be displayed: ${semesterValidation.message}`,
-            true
-        );
+        if (duplicateRepairMode) {
+            semesterStatus.textContent =
+                `${duplicateInspection.duplicates.length} curriculum course${duplicateInspection.duplicates.length === 1 ? " has" : "s have"} duplicate semester memberships. Only duplicate repair actions are available until they are resolved.`;
+            semesterStatus.classList.remove("is-error");
+            semesterStatus.classList.add("is-warning");
+            semesterList.replaceChildren();
+            renderSemesterCards(semesterSnapshot.records, courses, semesterList, {
+                repairMode: true,
+                duplicateGroups: duplicateInspection.duplicates
+            });
+        } else {
+            setAcademicViewState(
+                semesterStatus,
+                semesterList,
+                `Semester records could not be displayed: ${semesterValidation.message}`,
+                true
+            );
+        }
     } else if (semesterSnapshot.state === "empty") {
         setAcademicViewState(semesterStatus, semesterList, "No semesters have been created yet.");
     } else {
         semesterStatus.textContent = `Showing ${semesterSnapshot.records.length} semester${semesterSnapshot.records.length === 1 ? "" : "s"}.`;
         semesterStatus.classList.remove("is-error");
+        semesterStatus.classList.remove("is-warning");
         semesterList.replaceChildren();
         renderSemesterCards(semesterSnapshot.records, courses, semesterList);
     }
@@ -1232,7 +1391,8 @@ function renderAcademicStructure() {
                 : [],
             semesterRelationshipsVerified,
             semesterSnapshot.state,
-            curriculumList
+            curriculumList,
+            duplicateRepairMode
         );
     }
 }
