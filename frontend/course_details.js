@@ -24,6 +24,34 @@ let activeCourse = null;
 let selectedSubmissionFiles = [];
 let deadlineTimer = null;
 
+// Only a complete success result from the shared evaluator grants access.
+function hasVerifiedStudentAccess() {
+    try {
+        const evaluator = window.LearnSpaceStudentAccess;
+        if (!evaluator ||
+            typeof evaluator.evaluateStudentAccess !== "function") {
+            return false;
+        }
+
+        const result = evaluator.evaluateStudentAccess();
+        return Boolean(
+            result &&
+            typeof result === "object" &&
+            !Array.isArray(result) &&
+            result.allowed === true &&
+            result.code === "access_granted" &&
+            typeof result.userId === "string" &&
+            result.userId.trim() !== "" &&
+            typeof result.studentId === "string" &&
+            result.studentId.trim() !== "" &&
+            typeof result.semesterId === "string" &&
+            result.semesterId.trim() !== ""
+        );
+    } catch (error) {
+        return false;
+    }
+}
+
 // Read teacher-created courses from localStorage.
 function readTeacherCourses() {
     try {
@@ -381,7 +409,10 @@ function getSelectedCourse() {
     return null;
 }
 
-activeCourse = getSelectedCourse();
+const initialAccessGranted = hasVerifiedStudentAccess();
+if (initialAccessGranted) {
+    activeCourse = getSelectedCourse();
+}
 
 // Save or replace this student's submission without overwriting other course data.
 function saveStudentSubmission(assignment, files, status) {
@@ -1378,43 +1409,44 @@ function openAssignment(assignment) {
     assignmentDialog.showModal();
 }
 
-// Wire up the file picker and the two submission options.
-document.querySelector("#submissionFile").addEventListener("change", async (event) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    await addSelectedFiles(files);
-});
+if (initialAccessGranted) {
+    // Wire up the file picker and the two submission options only after access passes.
+    document.querySelector("#submissionFile").addEventListener("change", async (event) => {
+        const files = Array.from(event.target.files || []);
+        event.target.value = "";
+        await addSelectedFiles(files);
+    });
 
-document.querySelector("#markForReview").addEventListener("click", () => {
-    markSubmissionForReview();
-});
+    document.querySelector("#markForReview").addEventListener("click", () => {
+        markSubmissionForReview();
+    });
 
-document.querySelector("#demoSubmit").addEventListener("click", () => {
-    markSubmissionComplete();
-});
+    document.querySelector("#demoSubmit").addEventListener("click", () => {
+        markSubmissionComplete();
+    });
 
-document.querySelector("#closeAssignment").addEventListener("click", () => {
-    assignmentDialog.close();
-});
+    document.querySelector("#closeAssignment").addEventListener("click", () => {
+        assignmentDialog.close();
+    });
 
-// Keep the existing course tabs.
-const courseTabs = document.querySelectorAll(".course-tab");
-const coursePanels = document.querySelectorAll("[data-course-panel]");
+    // Keep the existing course tabs.
+    const courseTabs = document.querySelectorAll(".course-tab");
+    const coursePanels = document.querySelectorAll("[data-course-panel]");
 
-courseTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-        courseTabs.forEach((item) => {
-            const isSelected = item === tab;
-            item.classList.toggle("is-active", isSelected);
-            item.setAttribute("aria-selected", String(isSelected));
-        });
+    courseTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+            courseTabs.forEach((item) => {
+                const isSelected = item === tab;
+                item.classList.toggle("is-active", isSelected);
+                item.setAttribute("aria-selected", String(isSelected));
+            });
 
-        coursePanels.forEach((panel) => {
-            panel.hidden = panel.dataset.coursePanel !== tab.dataset.panel;
+            coursePanels.forEach((panel) => {
+                panel.hidden = panel.dataset.coursePanel !== tab.dataset.panel;
+            });
         });
     });
-});
-
+}
 // Recheck deadlines when the student returns to or refocuses the page.
 function refreshPageSubmissionState() {
     refreshSubmissionState({ preserveSelectedFiles: true });
@@ -1447,16 +1479,19 @@ function scheduleDeadlineCheck() {
     }, delay);
 }
 
-document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-        refreshPageSubmissionState();
-    }
-});
+if (initialAccessGranted) {
+    document.addEventListener("visibilitychange", () => {
+        if (!document.hidden) {
+            refreshPageSubmissionState();
+        }
+    });
 
-window.addEventListener("focus", refreshPageSubmissionState);
-
+    window.addEventListener("focus", refreshPageSubmissionState);
+}
 // Load the course, run its initial deadline check, and render its sections.
-if (!courseId) {
+if (!initialAccessGranted) {
+    showMessage("Your access to this course could not be verified.");
+} else if (!courseId) {
     showMessage("No course was selected.");
 } else if (!activeCourse) {
     showMessage("That course could not be found.");
