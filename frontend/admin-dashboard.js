@@ -21,6 +21,8 @@ const allowedAdmissionStatuses = new Set(["pending", "admitted", "rejected"]);
 const allowedAuthorizationStatuses = new Set(["pending", "authorized", "revoked"]);
 let selectedCurriculumCourseId = null;
 let selectedCurriculumCourseSnapshot = null;
+let selectedSemesterId = null;
+let selectedSemesterSnapshot = null;
 
 // These helpers support Admin accounts, profiles, semesters, and official
 // curriculum. Teacher offerings and their content keys are not accepted here.
@@ -502,6 +504,27 @@ function restoreSingleKeyIfStillOurs(key, previousValue, attemptedValue) {
     }
 }
 
+function haveSameJsonValue(left, right) {
+    if (left === right) return true;
+    if (!left || !right || typeof left !== "object" || typeof right !== "object") {
+        return false;
+    }
+
+    const leftIsArray = Array.isArray(left);
+    if (leftIsArray !== Array.isArray(right)) return false;
+    if (leftIsArray) {
+        return left.length === right.length &&
+            left.every((value, index) => haveSameJsonValue(value, right[index]));
+    }
+
+    const leftKeys = Object.keys(left).sort();
+    const rightKeys = Object.keys(right).sort();
+    return leftKeys.length === rightKeys.length &&
+        leftKeys.every((key, index) =>
+            key === rightKeys[index] && haveSameJsonValue(left[key], right[key])
+        );
+}
+
 // A missing key is only treated as an empty list when the caller explicitly
 // opts into creation. localStorage has no atomic compare-and-swap operation;
 // the re-read reduces, but cannot eliminate, cross-tab races.
@@ -586,13 +609,15 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
     }
 
     let nextValue;
+    let normalizedProposedRecords;
     try {
         nextValue = JSON.stringify(proposedRecords);
+        normalizedProposedRecords = JSON.parse(nextValue);
     } catch (error) {
         return { success: false, message: "The proposed records could not be saved. No data was changed." };
     }
 
-    if (nextValue === snapshot.rawValue) {
+    if (haveSameJsonValue(normalizedProposedRecords, existingRecords)) {
         return { success: true, message: "No changes were needed." };
     }
 
@@ -751,6 +776,7 @@ function renderSemesterCards(semesters, courses, listElement) {
         const header = document.createElement("div");
         const title = document.createElement("h3");
         const status = document.createElement("span");
+        const editButton = document.createElement("button");
         const details = document.createElement("dl");
         const includedCourses = document.createElement("ul");
 
@@ -758,7 +784,15 @@ function renderSemesterCards(semesters, courses, listElement) {
         status.className = `status-badge${semester.status === "active" ? " is-active" : ""}`;
         status.textContent = semester.status;
         title.textContent = semester.name;
-        header.append(title, status);
+        editButton.className = "course-edit-button";
+        editButton.type = "button";
+        editButton.textContent = "Edit";
+        editButton.setAttribute(
+            "aria-label",
+            `Edit semester ${semester.name} (${semester.academicYear})`
+        );
+        editButton.addEventListener("click", () => startSemesterEditing(semester.id));
+        header.append(title, status, editButton);
 
         details.className = "record-details";
         addRecordDetail(details, "Academic year", semester.academicYear);
@@ -1265,6 +1299,180 @@ function initializeSemesterForm() {
     form.addEventListener("reset", () => {
         setSemesterFormFeedback("");
     });
+    document.querySelector("#cancelSemesterEditButton").addEventListener(
+        "click",
+        cancelSemesterEditing
+    );
+}
+
+function setSemesterFormMode(isEditing) {
+    document.querySelector("#semesterFormTitle").textContent = isEditing
+        ? "Edit semester"
+        : "Add a semester";
+    document.querySelector("#addSemesterSubmitButton").textContent = isEditing
+        ? "Update Semester"
+        : "Add Semester";
+    document.querySelector("#addSemesterResetButton").hidden = isEditing;
+    document.querySelector("#cancelSemesterEditButton").hidden = !isEditing;
+}
+
+function readSemesterDataForEditing() {
+    const adminData = window.LearnSpaceAdminData;
+    let semesterSnapshot;
+    let courseSnapshot;
+
+    try {
+        semesterSnapshot = adminData.readArrayFromStorage(SEMESTER_STORAGE_KEY);
+        courseSnapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    } catch (error) {
+        return { success: false, message: "Semester data could not be read safely." };
+    }
+
+    if (semesterSnapshot.state === "missing") {
+        return { success: false, message: "This semester is no longer available." };
+    }
+    if (!isReadableAcademicCollection(semesterSnapshot)) {
+        return { success: false, message: getSemesterCreationStorageError(semesterSnapshot) };
+    }
+
+    let courses;
+    if (courseSnapshot.state === "missing") {
+        courses = [];
+    } else if (!isReadableAcademicCollection(courseSnapshot)) {
+        return { success: false, message: getCourseCreationStorageError(courseSnapshot) };
+    } else {
+        courses = courseSnapshot.records;
+    }
+
+    const courseValidation = adminData.validateCurriculumCourses(courses);
+    if (!courseValidation.success) {
+        return {
+            success: false,
+            message: `Curriculum data is invalid. ${courseValidation.message}`
+        };
+    }
+
+    const semesterValidation = adminData.validateSemesters(
+        semesterSnapshot.records,
+        courses
+    );
+    if (!semesterValidation.success) {
+        return { success: false, message: semesterValidation.message };
+    }
+
+    return { success: true, records: semesterSnapshot.records };
+}
+
+function startSemesterEditing(semesterId) {
+    const result = readSemesterDataForEditing();
+    if (!result.success) {
+        setSemesterFormFeedback(result.message, true);
+        return;
+    }
+
+    const semester = result.records.find((record) => record.id === semesterId);
+    if (!semester) {
+        setSemesterFormFeedback("This semester is no longer available. Refresh the list before editing.", true);
+        return;
+    }
+
+    selectedSemesterId = semester.id;
+    selectedSemesterSnapshot = JSON.stringify(semester);
+    setSemesterFormMode(true);
+    document.querySelector("#semesterName").value = semester.name;
+    document.querySelector("#semesterAcademicYear").value = semester.academicYear;
+    setSemesterFormFeedback(`Editing ${semester.name} (${semester.academicYear}).`);
+    document.querySelector("#semesterName").focus();
+}
+
+function cancelSemesterEditing() {
+    selectedSemesterId = null;
+    selectedSemesterSnapshot = null;
+    setSemesterFormMode(false);
+    document.querySelector("#addSemesterForm").reset();
+    setSemesterFormFeedback("");
+    document.querySelector("#semesterName").focus();
+}
+
+function handleEditSemesterSubmit(name, academicYear) {
+    const semesterId = selectedSemesterId;
+    const result = readSemesterDataForEditing();
+    if (!result.success) {
+        setSemesterFormFeedback(result.message, true);
+        return;
+    }
+
+    const selectedSemester = result.records.find((record) => record.id === semesterId);
+    if (!selectedSemester) {
+        setSemesterFormFeedback(
+            "This semester was removed before the update. Cancel editing and refresh the list.",
+            true
+        );
+        return;
+    }
+    if (JSON.stringify(selectedSemester) !== selectedSemesterSnapshot) {
+        setSemesterFormFeedback(
+            "This semester changed elsewhere. Cancel editing and reopen it before saving.",
+            true
+        );
+        return;
+    }
+
+    let selectedSemesterUpdated = false;
+    let updateResult;
+    try {
+        updateResult = window.LearnSpaceAdminData.updateArrayInStorage(
+            SEMESTER_STORAGE_KEY,
+            (draftRecords) => {
+                const semester = draftRecords.find((record) => record.id === semesterId);
+                if (!semester || JSON.stringify(semester) !== selectedSemesterSnapshot) {
+                    return draftRecords;
+                }
+
+                semester.name = name;
+                semester.academicYear = academicYear;
+                selectedSemesterUpdated = true;
+                return draftRecords;
+            }
+        );
+    } catch (error) {
+        setSemesterFormFeedback(
+            "The semester could not be updated safely. Existing data was left unchanged.",
+            true
+        );
+        return;
+    }
+
+    if (!updateResult || !updateResult.success) {
+        setSemesterFormFeedback(
+            updateResult && updateResult.message
+                ? updateResult.message
+                : "The semester could not be updated safely. Existing data was left unchanged.",
+            true
+        );
+        return;
+    }
+    if (!selectedSemesterUpdated) {
+        setSemesterFormFeedback(
+            "This semester changed or was removed before the update. Cancel editing and reopen it.",
+            true
+        );
+        return;
+    }
+
+    selectedSemesterId = null;
+    selectedSemesterSnapshot = null;
+    setSemesterFormMode(false);
+    document.querySelector("#addSemesterForm").reset();
+    try {
+        renderAcademicStructure();
+        setSemesterFormFeedback("Semester details updated.");
+    } catch (error) {
+        setSemesterFormFeedback(
+            "Semester details were saved, but the list could not refresh. Reload the page to verify them.",
+            true
+        );
+    }
 }
 
 function setSemesterFormFeedback(message, isError = false) {
@@ -1303,6 +1511,11 @@ function handleAddSemesterSubmit(event) {
             "Semester name and academic year cannot contain only whitespace.",
             true
         );
+        return;
+    }
+
+    if (selectedSemesterId !== null) {
+        handleEditSemesterSubmit(name, academicYear);
         return;
     }
 
