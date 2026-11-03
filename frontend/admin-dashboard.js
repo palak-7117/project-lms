@@ -884,6 +884,7 @@ function getProfileCount(profileKey, role, usersState) {
 
 let studentDirectoryRecords = [];
 let studentDirectoryReady = false;
+const studentAdmissionActionsInFlight = new Set();
 
 function validateStudentDirectorySemesters(semesters) {
     const idValidation = window.LearnSpaceAdminData.validateRecordIds(semesters, "id");
@@ -985,6 +986,160 @@ function appendDirectoryStatusCell(row, value, statusType = "") {
     row.append(cell);
 }
 
+function createStudentAdmissionActions(record) {
+    const cell = document.createElement("td");
+    if (!record.profile || record.profile.admissionStatus !== "pending") {
+        cell.textContent = "No action available";
+        return cell;
+    }
+
+    const actions = document.createElement("div");
+    const displayName = typeof record.user.name === "string" && record.user.name.trim()
+        ? record.user.name.trim()
+        : record.user.email;
+    const expectedSnapshot = JSON.stringify(record.profile);
+    actions.className = "student-admission-actions";
+
+    for (const decision of [
+        { status: "admitted", label: "Approve", className: "is-approve" },
+        { status: "rejected", label: "Reject", className: "is-reject" }
+    ]) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = `student-admission-button ${decision.className}`;
+        button.textContent = decision.label;
+        button.setAttribute("aria-label", `${decision.label} admission for ${displayName}`);
+        button.addEventListener("click", () => handleStudentAdmissionDecision(
+            record.profile.studentId,
+            expectedSnapshot,
+            decision.status,
+            displayName,
+            actions
+        ));
+        actions.append(button);
+    }
+
+    cell.append(actions);
+    return cell;
+}
+
+function refreshDirectoryWithAdmissionFeedback(message, state = "error") {
+    try {
+        renderStudentDirectory();
+    } catch (error) {
+        // Keep the actionable message visible even if a read or render fails.
+    }
+    setStudentDirectoryMessage(message, state);
+}
+
+function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus, studentName, actionsElement) {
+    if (nextStatus !== "admitted" && nextStatus !== "rejected") return;
+    if (studentAdmissionActionsInFlight.has(studentId)) return;
+
+    studentAdmissionActionsInFlight.add(studentId);
+    const buttons = actionsElement.querySelectorAll("button");
+    buttons.forEach((button) => { button.disabled = true; });
+
+    if (nextStatus === "rejected" && !window.confirm(
+        `Reject admission for ${studentName}? This changes only admission status. Authorization and semester allocation will be preserved.`
+    )) {
+        buttons.forEach((button) => { button.disabled = false; });
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const adminData = window.LearnSpaceAdminData;
+    let usersState;
+    let profilesState;
+    try {
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        profilesState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+    } catch (error) {
+        refreshDirectoryWithAdmissionFeedback("Student data could not be read safely. No changes were made.");
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    if (!isReadableArrayState(usersState.state) || !isReadableArrayState(profilesState.state)) {
+        const message = profilesState.state === "missing"
+            ? "Student profile data is no longer available. No changes were made."
+            : profilesState.message || usersState.message || "Student or account data is unavailable. No changes were made.";
+        refreshDirectoryWithAdmissionFeedback(message);
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const usersValidation = adminData.validateUsers(usersState.records);
+    const profileValidation = usersValidation.success
+        ? adminData.validateProfiles(profilesState.records, "student", usersState.records)
+        : usersValidation;
+    if (!usersValidation.success || !profileValidation.success) {
+        refreshDirectoryWithAdmissionFeedback(
+            `Student data is invalid and cannot be updated safely. ${profileValidation.message || usersValidation.message} No changes were made.`
+        );
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const selectedProfile = profilesState.records.find((profile) => profile.studentId === studentId);
+    if (!selectedProfile) {
+        refreshDirectoryWithAdmissionFeedback("This Student profile no longer exists. The directory was refreshed.");
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+    if (selectedProfile.admissionStatus !== "pending" ||
+        JSON.stringify(selectedProfile) !== expectedSnapshot) {
+        refreshDirectoryWithAdmissionFeedback("This Student profile changed or is no longer pending. The directory was refreshed.");
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    let admissionUpdated = false;
+    let updateResult;
+    try {
+        updateResult = adminData.updateArrayInStorage(
+            STUDENT_STORAGE_KEY,
+            (draftProfiles) => {
+                const profile = draftProfiles.find((item) => item.studentId === studentId);
+                if (!profile || profile.admissionStatus !== "pending" ||
+                    JSON.stringify(profile) !== expectedSnapshot) {
+                    return draftProfiles;
+                }
+
+                profile.admissionStatus = nextStatus;
+                admissionUpdated = true;
+                return draftProfiles;
+            }
+        );
+    } catch (error) {
+        refreshDirectoryWithAdmissionFeedback("The admission decision could not be saved safely. Existing data was left unchanged.");
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    if (!updateResult || !updateResult.success) {
+        refreshDirectoryWithAdmissionFeedback(
+            updateResult && updateResult.message
+                ? updateResult.message
+                : "The admission decision could not be verified. No success was recorded."
+        );
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    if (!admissionUpdated) {
+        refreshDirectoryWithAdmissionFeedback("This Student profile changed before the decision was saved. The directory was refreshed.");
+        studentAdmissionActionsInFlight.delete(studentId);
+        return;
+    }
+
+    refreshDirectoryWithAdmissionFeedback(
+        `Admission ${nextStatus === "admitted" ? "approved" : "rejected"} for ${studentName}. Authorization status and semester allocation were preserved.`,
+        ""
+    );
+    studentAdmissionActionsInFlight.delete(studentId);
+}
+
 function getStudentDirectoryFilteredRecords() {
     const search = document.querySelector("#studentDirectorySearch").value.trim().toLowerCase();
     const admissionFilter = document.querySelector("#studentAdmissionFilter").value;
@@ -1031,7 +1186,7 @@ function renderStudentDirectoryRows() {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
         cell.className = "student-directory-empty-cell";
-        cell.colSpan = 6;
+        cell.colSpan = 7;
         cell.textContent = studentDirectoryReady
             ? "No students match the current search and filters."
             : "Student records are unavailable.";
@@ -1055,6 +1210,7 @@ function renderStudentDirectoryRows() {
                 appendDirectoryStatusCell(row, "No profile", "warning");
                 appendDirectoryStatusCell(row, "No profile", "warning");
                 appendDirectoryStatusCell(row, "No profile", "warning");
+                row.append(createStudentAdmissionActions(record));
             } else {
                 appendDirectoryStatusCell(row, record.profile.admissionStatus, record.profile.admissionStatus);
                 appendDirectoryStatusCell(row, record.profile.authorizationStatus, record.profile.authorizationStatus);
@@ -1077,6 +1233,7 @@ function renderStudentDirectoryRows() {
                     }
                 }
                 appendDirectoryStatusCell(row, semesterName, semesterStatus);
+                row.append(createStudentAdmissionActions(record));
             }
             tbody.append(row);
         }

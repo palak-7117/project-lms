@@ -438,6 +438,48 @@
     color: #80532f;
 }
 
+.student-admission-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    min-width: 160px;
+}
+
+.student-admission-button {
+    min-height: 34px;
+    padding: 7px 10px;
+    border: 1px solid var(--olive, #566246);
+    border-radius: 5px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.student-admission-button.is-approve {
+    background: var(--olive, #566246);
+    color: #fff;
+}
+
+.student-admission-button.is-approve:hover:not(:disabled) {
+    background: #46523a;
+}
+
+.student-admission-button.is-reject {
+    border-color: rgba(153, 104, 54, 0.55);
+    background: rgba(255, 254, 250, 0.85);
+    color: #80532f;
+}
+
+.student-admission-button.is-reject:hover:not(:disabled) {
+    background: rgba(226, 193, 145, 0.24);
+}
+
+.student-admission-button:disabled {
+    cursor: wait;
+    opacity: 0.58;
+}
+
 .academic-data-panel {
     min-width: 0;
 }
