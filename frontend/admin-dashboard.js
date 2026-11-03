@@ -173,7 +173,7 @@ function validateCurriculumCourses(courses) {
     return { success: true, message: "" };
 }
 
-function validateSemesters(semesters, curriculumCourses = []) {
+function validateSemesterRecords(semesters, curriculumCourses = [], enforceGlobalCourseUniqueness = true) {
     const idValidation = validateRecordIds(semesters, "id");
     if (!idValidation.success) return idValidation;
 
@@ -186,6 +186,7 @@ function validateSemesters(semesters, curriculumCourses = []) {
     }
 
     const curriculumCourseIds = new Set(curriculumCourses.map((course) => course.id));
+    const semesterByCourseId = new Map();
     for (const semester of semesters) {
         if (typeof semester.name !== "string" || !semester.name.trim()) {
             return { success: false, message: "A semester must have a nonempty name." };
@@ -217,7 +218,12 @@ function validateSemesters(semesters, curriculumCourses = []) {
                 return { success: false, message: "A semester refers to a curriculum course that does not exist." };
             }
 
+            if (enforceGlobalCourseUniqueness && semesterByCourseId.has(courseId)) {
+                return { success: false, message: "A curriculum course can belong to only one semester." };
+            }
+
             seenCourseIds.add(courseId);
+            if (!semesterByCourseId.has(courseId)) semesterByCourseId.set(courseId, semester.id);
         }
 
         if (!hasValidCreatedAt(semester.createdAt)) {
@@ -226,6 +232,49 @@ function validateSemesters(semesters, curriculumCourses = []) {
     }
 
     return { success: true, message: "" };
+}
+
+function validateSemesters(semesters, curriculumCourses = []) {
+    return validateSemesterRecords(semesters, curriculumCourses, true);
+}
+
+// Repair inspection may tolerate cross-semester duplicates only. All other
+// semester and curriculum relationship rules remain enforced.
+function validateSemestersForDuplicateRepair(semesters, curriculumCourses = []) {
+    return validateSemesterRecords(semesters, curriculumCourses, false);
+}
+
+function getDuplicateCurriculumMemberships(semesters, curriculumCourses) {
+    const validation = validateSemestersForDuplicateRepair(semesters, curriculumCourses);
+    if (!validation.success) return { success: false, message: validation.message, duplicates: [] };
+
+    const courseById = new Map(curriculumCourses.map((course) => [course.id, course]));
+    const membershipsByCourseId = new Map();
+    for (const semester of semesters) {
+        for (const courseId of semester.curriculumCourseIds) {
+            if (!membershipsByCourseId.has(courseId)) membershipsByCourseId.set(courseId, []);
+            membershipsByCourseId.get(courseId).push({
+                semesterId: semester.id,
+                semesterName: semester.name,
+                academicYear: semester.academicYear
+            });
+        }
+    }
+
+    const duplicates = [];
+    for (const [courseId, memberships] of membershipsByCourseId) {
+        if (memberships.length < 2) continue;
+        const course = courseById.get(courseId);
+        duplicates.push({
+            courseId,
+            courseCode: course.code,
+            courseName: course.name,
+            semesters: memberships,
+            membershipCount: memberships.length
+        });
+    }
+
+    return { success: true, message: "", duplicates };
 }
 
 function readCurriculumCoursesForRelationshipValidation() {
@@ -531,7 +580,13 @@ function haveSameJsonValue(left, right) {
 // Update callbacks must mutate the supplied draft objects and return those
 // same objects in their original order, followed only by newly created records.
 // Replacing, removing, or reordering an existing object is rejected.
-function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {}) {
+const runSafeArrayUpdate = (
+    key,
+    updateRecords,
+    { allowMissing = false } = {},
+    validateExisting = validateCollectionForKey,
+    validateProposed = validateCollectionForKey
+) => {
     if (!ADMIN_ARRAY_STORAGE_KEYS.has(key)) {
         return { success: false, message: "This storage key is outside the Admin data helper scope." };
     }
@@ -556,7 +611,7 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
         return { success: false, message: `Related data cannot be safely checked: ${relationshipSnapshot.message}` };
     }
 
-    const existingValidation = validateCollectionForKey(
+    const existingValidation = validateExisting(
         key,
         existingRecords,
         relationshipSnapshot.records
@@ -599,10 +654,11 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
         return { success: false, message: "The proposed records could not be checked. No data was changed." };
     }
 
-    const proposedValidation = validateCollectionForKey(
+    const proposedValidation = validateProposed(
         key,
         proposedRecords,
-        relationshipSnapshot.records
+        relationshipSnapshot.records,
+        existingRecords
     );
     if (!proposedValidation.success) {
         return { success: false, message: `The proposed update is invalid: ${proposedValidation.message} No data was changed.` };
@@ -647,7 +703,153 @@ function updateArrayInStorage(key, updateRecords, { allowMissing = false } = {})
     }
 
     return { success: true, message: "The record list was saved." };
+};
+
+function updateArrayInStorage(key, updateRecords, options = {}) {
+    return runSafeArrayUpdate(key, updateRecords, options);
 }
+
+function getMembershipCounts(semesters) {
+    const counts = new Map();
+    for (const semester of semesters) {
+        for (const courseId of semester.curriculumCourseIds) {
+            counts.set(courseId, (counts.get(courseId) || 0) + 1);
+        }
+    }
+    return counts;
+}
+
+function validateDuplicateRepairProposal(proposedRecords, existingRecords, curriculumCourses, semesterId, courseId) {
+    const existingValidation = validateSemestersForDuplicateRepair(existingRecords, curriculumCourses);
+    if (!existingValidation.success) return existingValidation;
+    const proposedValidation = validateSemestersForDuplicateRepair(proposedRecords, curriculumCourses);
+    if (!proposedValidation.success) return proposedValidation;
+
+    const existingCounts = getMembershipCounts(existingRecords);
+    const proposedCounts = getMembershipCounts(proposedRecords);
+    if ((existingCounts.get(courseId) || 0) < 2 ||
+        proposedCounts.get(courseId) !== existingCounts.get(courseId) - 1) {
+        return { success: false, message: "The selected duplicate membership did not decrease exactly once." };
+    }
+
+    for (const [otherCourseId, count] of existingCounts) {
+        if (otherCourseId !== courseId && (proposedCounts.get(otherCourseId) || 0) > count) {
+            return { success: false, message: "The repair would increase another course's duplicate memberships." };
+        }
+    }
+
+    const targetIndex = existingRecords.findIndex((semester) => semester.id === semesterId);
+    if (targetIndex < 0 || proposedRecords.length !== existingRecords.length) {
+        return { success: false, message: "The repair must preserve every existing semester." };
+    }
+
+    const expectedRecords = JSON.parse(JSON.stringify(existingRecords));
+    const expectedTarget = expectedRecords[targetIndex];
+    const membershipIndex = expectedTarget.curriculumCourseIds.indexOf(courseId);
+    if (membershipIndex < 0 || expectedTarget.curriculumCourseIds.lastIndexOf(courseId) !== membershipIndex) {
+        return { success: false, message: "The selected duplicate membership no longer exists exactly once in that semester." };
+    }
+    expectedTarget.curriculumCourseIds.splice(membershipIndex, 1);
+
+    if (!haveSameJsonValue(proposedRecords, expectedRecords)) {
+        return { success: false, message: "A duplicate repair may remove only the selected course membership." };
+    }
+
+    const remainingDuplicates = getDuplicateCurriculumMemberships(proposedRecords, curriculumCourses);
+    if (!remainingDuplicates.success) return remainingDuplicates;
+    if (remainingDuplicates.duplicates.length === 0) {
+        return validateSemesters(proposedRecords, curriculumCourses);
+    }
+
+    return { success: true, message: "" };
+}
+
+// Private repair-only operation. Unlike the public updater, this path accepts
+// existing cross-semester duplicates for inspection, but permits only one
+// selected duplicate membership removal and applies all shared write safeguards.
+const repairDuplicateSemesterMembership = (
+    semesterId,
+    courseId,
+    expectedSemesterSnapshot,
+    expectedDuplicateSemesterIds
+) => {
+    if (typeof semesterId !== "string" || !semesterId.trim() ||
+        typeof courseId !== "string" || !courseId.trim() ||
+        !expectedSemesterSnapshot || typeof expectedSemesterSnapshot !== "object" ||
+        !Array.isArray(expectedDuplicateSemesterIds)) {
+        return { success: false, message: "A semester, course, and duplicate snapshot are required." };
+    }
+
+    const currentSemesters = readArrayFromStorage(SEMESTER_STORAGE_KEY);
+    if (!isReadableArrayState(currentSemesters.state)) {
+        return { success: false, message: currentSemesters.message || "Semester data is unavailable." };
+    }
+    const courseSnapshot = readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    if (!isReadableArrayState(courseSnapshot.state)) {
+        return { success: false, message: courseSnapshot.message || "Curriculum data is unavailable." };
+    }
+    const courseValidation = validateCurriculumCourses(courseSnapshot.records);
+    if (!courseValidation.success) return { success: false, message: `Curriculum data is invalid. ${courseValidation.message}` };
+
+    const duplicateResult = getDuplicateCurriculumMemberships(currentSemesters.records, courseSnapshot.records);
+    if (!duplicateResult.success) return { success: false, message: duplicateResult.message };
+    const duplicate = duplicateResult.duplicates.find((item) => item.courseId === courseId);
+    if (!duplicate || duplicate.membershipCount < 2) {
+        return { success: false, message: "That course no longer has a duplicate membership to repair." };
+    }
+
+    const expectedIds = [...expectedDuplicateSemesterIds].sort();
+    const currentIds = duplicate.semesters.map((membership) => membership.semesterId).sort();
+    if (!haveSameJsonValue(expectedIds, currentIds)) {
+        return { success: false, message: "Duplicate memberships changed. Refresh the semester list before repairing." };
+    }
+
+    const selectedSemester = currentSemesters.records.find((semester) => semester.id === semesterId);
+    if (!selectedSemester || !duplicate.semesters.some((membership) => membership.semesterId === semesterId) ||
+        !haveSameJsonValue(selectedSemester, expectedSemesterSnapshot)) {
+        return { success: false, message: "The selected semester changed. Refresh the semester list before repairing." };
+    }
+
+    let membershipRemoved = false;
+    const result = runSafeArrayUpdate(
+        SEMESTER_STORAGE_KEY,
+        (draftRecords) => {
+            const target = draftRecords.find((semester) => semester.id === semesterId);
+            const draftDuplicates = getDuplicateCurriculumMemberships(draftRecords, courseSnapshot.records);
+            const draftDuplicate = draftDuplicates.success &&
+                draftDuplicates.duplicates.find((item) => item.courseId === courseId);
+            if (!target || !haveSameJsonValue(target, expectedSemesterSnapshot) ||
+                !draftDuplicate || draftDuplicate.membershipCount < 2 ||
+                !haveSameJsonValue(
+                    draftDuplicate.semesters.map((membership) => membership.semesterId).sort(),
+                    expectedIds
+                )) {
+                return draftRecords;
+            }
+
+            const membershipIndex = target.curriculumCourseIds.indexOf(courseId);
+            if (membershipIndex < 0 || target.curriculumCourseIds.lastIndexOf(courseId) !== membershipIndex) {
+                return draftRecords;
+            }
+            target.curriculumCourseIds.splice(membershipIndex, 1);
+            membershipRemoved = true;
+            return draftRecords;
+        },
+        {},
+        (key, records, courses) => key === SEMESTER_STORAGE_KEY
+            ? validateSemestersForDuplicateRepair(records, courses)
+            : validateCollectionForKey(key, records, courses),
+        (key, records, courses, existingRecords) => key === SEMESTER_STORAGE_KEY
+            ? validateDuplicateRepairProposal(records, existingRecords, courses, semesterId, courseId)
+            : validateCollectionForKey(key, records, courses)
+    );
+
+    if (!result.success) return result;
+    if (!membershipRemoved) {
+        return { success: false, message: "The duplicate membership changed before the repair. No data was changed." };
+    }
+    return { success: true, message: "The selected duplicate membership was removed." };
+};
 
 // Reusable by Admin workflows. The allowlist excludes legacy teacher course
 // offerings and all course-content keys.
