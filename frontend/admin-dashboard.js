@@ -884,7 +884,42 @@ function getProfileCount(profileKey, role, usersState) {
 
 let studentDirectoryRecords = [];
 let studentDirectoryReady = false;
+let studentDirectoryAllocatableSemesters = [];
+let studentDirectoryAllocationDataState = "unavailable";
 const studentDirectoryActionsInFlight = new Set();
+
+function readAllocatableSemesters() {
+    const adminData = window.LearnSpaceAdminData;
+    const semesterSnapshot = adminData.readArrayFromStorage(SEMESTER_STORAGE_KEY);
+    const curriculumSnapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    if (!isReadableArrayState(semesterSnapshot.state) ||
+        !isReadableArrayState(curriculumSnapshot.state)) {
+        return {
+            success: false,
+            message: semesterSnapshot.message || curriculumSnapshot.message ||
+                "Semester and curriculum data must be configured before allocating students."
+        };
+    }
+
+    const curriculumValidation = adminData.validateCurriculumCourses(curriculumSnapshot.records);
+    if (!curriculumValidation.success) {
+        return { success: false, message: `Curriculum data is invalid. ${curriculumValidation.message}` };
+    }
+    const semesterValidation = adminData.validateSemesters(
+        semesterSnapshot.records,
+        curriculumSnapshot.records
+    );
+    if (!semesterValidation.success) {
+        return { success: false, message: `Semester data is invalid. ${semesterValidation.message}` };
+    }
+
+    return {
+        success: true,
+        semesters: semesterSnapshot.records,
+        semesterRawValue: semesterSnapshot.rawValue,
+        curriculumRawValue: curriculumSnapshot.rawValue
+    };
+}
 
 function validateStudentDirectorySemesters(semesters) {
     const idValidation = window.LearnSpaceAdminData.validateRecordIds(semesters, "id");
@@ -1062,6 +1097,229 @@ function createStudentAuthorizationActions(record, rowActions, displayName) {
     rowActions.append(actions);
 }
 
+function createStudentSemesterAllocationActions(record, rowActions, displayName) {
+    const actions = document.createElement("div");
+    const label = document.createElement("label");
+    const select = document.createElement("select");
+    const prompt = document.createElement("option");
+    const button = document.createElement("button");
+    const activeSemesters = studentDirectoryAllocatableSemesters.filter(
+        (semester) => semester.status === "active"
+    );
+
+    actions.className = "student-authorization-actions";
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `Semester allocation for ${displayName}`);
+    select.id = `studentSemesterAllocation${studentDirectoryRecords.indexOf(record) + 1}`;
+    prompt.value = "";
+    prompt.textContent = activeSemesters.length
+        ? "Choose an active semester"
+        : "No active semesters available";
+    select.append(prompt);
+
+    for (const semester of activeSemesters) {
+        const option = document.createElement("option");
+        option.value = semester.id;
+        option.textContent = `${semester.name} (${semester.academicYear})`;
+        select.append(option);
+    }
+
+    if (record.profile.semesterId && activeSemesters.some(
+        (semester) => semester.id === record.profile.semesterId
+    )) {
+        select.value = record.profile.semesterId;
+    }
+
+    label.htmlFor = select.id;
+    label.textContent = `Allocate semester for ${displayName}`;
+    button.type = "button";
+    button.className = "student-admission-button is-approve";
+    button.textContent = record.profile.semesterId === null
+        ? "Allocate"
+        : "Change allocation";
+    button.disabled = studentDirectoryAllocationDataState !== "valid" ||
+        activeSemesters.length === 0 || !select.value ||
+        select.value === record.profile.semesterId;
+    button.addEventListener("click", () => {
+        handleStudentSemesterAllocation(record, select.value, displayName, rowActions);
+    });
+    select.disabled = studentDirectoryAllocationDataState !== "valid" ||
+        activeSemesters.length === 0;
+    select.addEventListener("change", () => {
+        button.disabled = studentDirectoryAllocationDataState !== "valid" ||
+            !select.value || select.value === record.profile.semesterId;
+    });
+
+    if (studentDirectoryAllocationDataState !== "valid") {
+        const note = document.createElement("span");
+        note.className = "data-state is-warning";
+        note.textContent = "Valid semester and curriculum data are required.";
+        actions.append(label, select, button, note);
+    } else {
+        actions.append(label, select, button);
+    }
+    rowActions.append(actions);
+}
+
+function handleStudentSemesterAllocation(record, targetSemesterId, studentName, actionsElement) {
+    const studentId = record.profile.studentId;
+    if (!studentId || !targetSemesterId || studentDirectoryActionsInFlight.has(studentId)) return;
+
+    studentDirectoryActionsInFlight.add(studentId);
+    actionsElement.querySelectorAll("button, select").forEach((control) => {
+        control.disabled = true;
+    });
+
+    const showAllocationFeedback = (message, state = "error") => {
+        try {
+            renderStudentDirectory();
+        } catch (error) {
+            // Keep the actionable message visible if a refresh fails.
+        }
+        setStudentDirectoryMessage(message, state);
+        studentDirectoryActionsInFlight.delete(studentId);
+    };
+
+    const expectedProfileSnapshot = JSON.stringify(record.profile);
+
+    let usersState;
+    let profilesState;
+    let semesterData;
+    try {
+        const adminData = window.LearnSpaceAdminData;
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        profilesState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+        semesterData = readAllocatableSemesters();
+    } catch (error) {
+        showAllocationFeedback("Student, semester, or curriculum data could not be read safely. No changes were made.");
+        return;
+    }
+
+    if (!isReadableArrayState(usersState.state) || !isReadableArrayState(profilesState.state) ||
+        !semesterData.success) {
+        showAllocationFeedback(
+            semesterData.message || profilesState.message || usersState.message ||
+                "Student data is unavailable. No changes were made."
+        );
+        return;
+    }
+
+    const adminData = window.LearnSpaceAdminData;
+    const usersValidation = adminData.validateUsers(usersState.records);
+    const profilesValidation = usersValidation.success
+        ? adminData.validateProfiles(profilesState.records, "student", usersState.records)
+        : usersValidation;
+    if (!usersValidation.success || !profilesValidation.success) {
+        showAllocationFeedback(
+            `Student data is invalid and cannot be updated safely. ${profilesValidation.message || usersValidation.message} No changes were made.`
+        );
+        return;
+    }
+
+    const matchingProfiles = profilesState.records.filter(
+        (profile) => profile.studentId === studentId
+    );
+    if (matchingProfiles.length !== 1 ||
+        JSON.stringify(matchingProfiles[0]) !== expectedProfileSnapshot) {
+        showAllocationFeedback("This Student profile changed or no longer exists. The directory was refreshed.");
+        return;
+    }
+
+    const targetMatches = semesterData.semesters.filter(
+        (semester) => semester.id === targetSemesterId
+    );
+    if (targetMatches.length !== 1 || targetMatches[0].status !== "active") {
+        showAllocationFeedback("The selected semester is missing, invalid, or inactive. No changes were made.");
+        return;
+    }
+    const targetSemester = targetMatches[0];
+    const targetLabel = `${targetSemester.name} (${targetSemester.academicYear})`;
+    const existingSemesterMatches = record.profile.semesterId === null
+        ? []
+        : semesterData.semesters.filter((semester) => semester.id === record.profile.semesterId);
+    const existingSemester = existingSemesterMatches.length === 1
+        ? existingSemesterMatches[0]
+        : null;
+    const currentSemester = existingSemester
+        ? `${existingSemester.name} (${existingSemester.academicYear}${existingSemester.status === "inactive" ? ", inactive" : ""})`
+        : record.profile.semesterId === null
+            ? "Not allocated"
+            : `Unknown semester (${record.profile.semesterId})`;
+    if (record.profile.semesterId === targetSemester.id) {
+        showAllocationFeedback("The Student is already allocated to this semester.", "");
+        return;
+    }
+
+    if (!window.confirm(
+        `Change the semester allocation for ${studentName} from ${currentSemester} to ${targetLabel}? This replaces the current semesterId; historical semester allocations are not tracked. Admission, authorization, and account status will not change.`
+    )) {
+        renderStudentDirectory();
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const expectedSemesterRawValue = semesterData.semesterRawValue;
+    const expectedCurriculumRawValue = semesterData.curriculumRawValue;
+    // Re-read after confirmation so a stale or deactivated semester cannot be
+    // assigned from an old directory snapshot.
+    semesterData = readAllocatableSemesters();
+    const latestTarget = semesterData.success
+        ? semesterData.semesters.filter((semester) => semester.id === targetSemesterId)
+        : [];
+    let semesterSnapshotsMatch = false;
+    try {
+        semesterSnapshotsMatch = semesterData.success &&
+            semesterData.semesterRawValue === expectedSemesterRawValue &&
+            semesterData.curriculumRawValue === expectedCurriculumRawValue &&
+            localStorage.getItem(SEMESTER_STORAGE_KEY) === semesterData.semesterRawValue &&
+            localStorage.getItem(CURRICULUM_COURSE_STORAGE_KEY) === semesterData.curriculumRawValue;
+    } catch (error) {
+        semesterSnapshotsMatch = false;
+    }
+    if (!semesterSnapshotsMatch || latestTarget.length !== 1 || latestTarget[0].status !== "active") {
+        showAllocationFeedback("Semester or curriculum data changed or became invalid. Refresh and try again; no changes were made.");
+        return;
+    }
+
+    let allocationUpdated = false;
+    let updateResult;
+    try {
+        updateResult = adminData.updateArrayInStorage(
+            STUDENT_STORAGE_KEY,
+            (draftProfiles) => {
+                const profile = draftProfiles.find((item) => item.studentId === studentId);
+                if (!profile || JSON.stringify(profile) !== expectedProfileSnapshot) {
+                    return draftProfiles;
+                }
+                profile.semesterId = targetSemesterId;
+                allocationUpdated = true;
+                return draftProfiles;
+            }
+        );
+    } catch (error) {
+        showAllocationFeedback("The semester allocation could not be saved safely. Existing data was left unchanged.");
+        return;
+    }
+
+    if (!updateResult || !updateResult.success) {
+        showAllocationFeedback(
+            updateResult && updateResult.message
+                ? updateResult.message
+                : "The semester allocation could not be verified. No success was recorded."
+        );
+        return;
+    }
+    if (!allocationUpdated) {
+        showAllocationFeedback("This Student profile changed before the allocation was saved. The directory was refreshed.");
+        return;
+    }
+
+    showAllocationFeedback(
+        `Semester allocation updated for ${studentName}: ${targetLabel}. Admission, authorization, account status, and other profile data were preserved.`,
+        ""
+    );
+}
+
 function createStudentActions(record) {
     const cell = document.createElement("td");
     if (!record.profile) {
@@ -1077,6 +1335,7 @@ function createStudentActions(record) {
 
     createStudentAdmissionActions(record, rowActions, displayName);
     createStudentAuthorizationActions(record, rowActions, displayName);
+    createStudentSemesterAllocationActions(record, rowActions, displayName);
     cell.append(rowActions);
     return cell;
 }
@@ -1423,6 +1682,8 @@ function renderStudentDirectoryRows() {
 function renderStudentDirectory() {
     studentDirectoryReady = false;
     studentDirectoryRecords = [];
+    studentDirectoryAllocatableSemesters = [];
+    studentDirectoryAllocationDataState = "unavailable";
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentsState = readArrayFromStorage(STUDENT_STORAGE_KEY);
     const semestersState = readArrayFromStorage(SEMESTER_STORAGE_KEY);
@@ -1504,6 +1765,11 @@ function renderStudentDirectory() {
         }
     }
     const semesterById = new Map(semesterRecords.map((semester) => [semester.id, semester]));
+    const allocatableSemesterData = readAllocatableSemesters();
+    if (allocatableSemesterData.success) {
+        studentDirectoryAllocatableSemesters = allocatableSemesterData.semesters;
+        studentDirectoryAllocationDataState = "valid";
+    }
     const profileByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
     let missingSemesterReferences = 0;
 
