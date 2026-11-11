@@ -1,5 +1,7 @@
 
 const STORAGE_KEY = "learnspaceCourses";
+const CURRICULUM_STORAGE_KEY = "learnspaceCurriculumCourses";
+const SEMESTER_STORAGE_KEY = "learnspaceSemesters";
 const teacherAccess = window.LearnSpaceTeacherAccess;
 const initialTeacherAccess = teacherAccess?.evaluate();
 let teacherAccessRevoked = !initialTeacherAccess?.allowed;
@@ -27,10 +29,13 @@ function revokeTeacherAccess() {
         courseGrid.append(message);
     }
     if (addCourseBtn) addCourseBtn.disabled = true;
+    setTeacherCurriculumState("Teacher access is no longer available.", true);
 }
 
 const courseGrid = document.querySelector("#courseGrid");
 const courseCount = document.querySelector("#courseCount");
+const teacherCurriculumStatus = document.querySelector("#teacherCurriculumStatus");
+const teacherCurriculumList = document.querySelector("#teacherCurriculumList");
 
 const addCourseBtn = document.querySelector("#addCourseBtn");
 const courseModalBackdrop = document.querySelector("#courseModalBackdrop");
@@ -42,9 +47,123 @@ const newCourseName = document.querySelector("#newCourseName");
 const newInstructorName = document.querySelector("#newInstructorName");
 const newCourseDescription = document.querySelector("#newCourseDescription");
 const courseFormMessage = document.querySelector("#courseFormMessage");
+
+function readOfficialCollection(storageKey, label) {
+    let rawValue;
+    try {
+        rawValue = localStorage.getItem(storageKey);
+    } catch (error) {
+        return { success: false, rawValue: null, message: `${label} could not be read.` };
+    }
+    if (rawValue === null) return { success: true, rawValue, records: [] };
+    let records;
+    try {
+        records = JSON.parse(rawValue);
+    } catch (error) {
+        return { success: false, rawValue, message: `${label} contains malformed data.` };
+    }
+    if (!Array.isArray(records)) {
+        return { success: false, rawValue, message: `${label} must be a list.` };
+    }
+    return { success: true, rawValue, records };
+}
+
+function setTeacherCurriculumState(message, isError = false) {
+    if (teacherCurriculumList) teacherCurriculumList.replaceChildren();
+    if (teacherCurriculumStatus) {
+        teacherCurriculumStatus.textContent = message;
+        teacherCurriculumStatus.classList.toggle("is-error", isError);
+        teacherCurriculumStatus.setAttribute("role", isError ? "alert" : "status");
+    }
+}
+
+function renderOfficialCurriculum(courses, semesters) {
+    if (!hasTeacherAccess()) return;
+    const semesterByCourseId = new Map();
+    for (const semester of semesters) {
+        for (const courseId of semester.curriculumCourseIds) {
+            semesterByCourseId.set(courseId, semester);
+        }
+    }
+    const cards = courses.map((course) => {
+        const card = document.createElement("article");
+        card.className = "course-content-card";
+        const heading = document.createElement("h3");
+        heading.textContent = `${course.code} — ${course.name}`;
+        const details = document.createElement("p");
+        const semester = semesterByCourseId.get(course.id);
+        details.textContent = semester
+            ? `${semester.name} · ${semester.academicYear} · ${semester.status === "active" ? "Active" : "Inactive"}`
+            : "Not assigned to a semester";
+        card.append(heading, details);
+        if (course.description?.trim()) {
+            const description = document.createElement("p");
+            description.textContent = course.description;
+            card.append(description);
+        }
+        return card;
+    });
+    if (!hasTeacherAccess()) return;
+    teacherCurriculumList.replaceChildren(...cards);
+    if (teacherCurriculumStatus) {
+        teacherCurriculumStatus.textContent = courses.length
+            ? `${courses.length} official subject${courses.length === 1 ? "" : "s"}.`
+            : "No official curriculum subjects are configured.";
+        teacherCurriculumStatus.classList.toggle("is-error", false);
+        teacherCurriculumStatus.setAttribute("role", "status");
+    }
+}
+
+function refreshTeacherCurriculum() {
+    if (!hasTeacherAccess()) {
+        setTeacherCurriculumState("Teacher access is no longer available.", true);
+        return;
+    }
+    const courseSnapshot = readOfficialCollection(CURRICULUM_STORAGE_KEY, "Official curriculum");
+    const semesterSnapshot = readOfficialCollection(SEMESTER_STORAGE_KEY, "Semester data");
+    if (!courseSnapshot.success || !semesterSnapshot.success) {
+        setTeacherCurriculumState(courseSnapshot.message || semesterSnapshot.message, true);
+        return;
+    }
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    if (!offeringData) {
+        setTeacherCurriculumState("Curriculum validation is unavailable.", true);
+        return;
+    }
+    const courseValidation = offeringData.validateOfficialCurriculum(courseSnapshot.records);
+    const semesterValidation = offeringData.validateSemesters(
+        semesterSnapshot.records,
+        courseSnapshot.records
+    );
+    if (!courseValidation.success || !semesterValidation.success) {
+        setTeacherCurriculumState(courseValidation.message || semesterValidation.message, true);
+        return;
+    }
+    if (!hasTeacherAccess()) return;
+    try {
+        if (localStorage.getItem(CURRICULUM_STORAGE_KEY) !== courseSnapshot.rawValue ||
+            localStorage.getItem(SEMESTER_STORAGE_KEY) !== semesterSnapshot.rawValue) {
+            setTeacherCurriculumState("Official curriculum changed while it was loading. Refresh to try again.", true);
+            return;
+        }
+    } catch (error) {
+        setTeacherCurriculumState("Official curriculum could not be verified safely.", true);
+        return;
+    }
+    renderOfficialCurriculum(courseSnapshot.records, semesterSnapshot.records);
+}
 let courseDataState = "loading";
 let courses = null;
 let courseStorageRawValue = null;
+let courseDataErrorMessage = null;
+
+function validateCourseCollection(records) {
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    if (!offeringData || typeof offeringData.validateStoredCourseCollection !== "function") {
+        return { success: false, message: "Course record validation is unavailable." };
+    }
+    return offeringData.validateStoredCourseCollection(records);
+}
 
 // Read the original sample courses from HTML on first use.
 function getInitialCoursesFromHTML() {
@@ -61,6 +180,7 @@ function getInitialCoursesFromHTML() {
 // Save the complete course list in localStorage.
 function markCourseStorageProblem(currentRawValue) {
     courseDataState = "changed";
+    courseDataErrorMessage = null;
     if (currentRawValue !== null) {
         try {
             if (!Array.isArray(JSON.parse(currentRawValue))) {
@@ -85,6 +205,21 @@ function saveCourses(courseList) {
         const currentRawValue = localStorage.getItem(STORAGE_KEY);
         if (currentRawValue !== courseStorageRawValue) {
             markCourseStorageProblem(currentRawValue);
+            return false;
+        }
+        const validation = validateCourseCollection(courseList);
+        if (!validation.success) {
+            courseDataState = validation.state === "changed" || validation.state === "unavailable"
+                ? validation.state
+                : "invalid";
+            courseDataErrorMessage = validation.message || "Course records failed validation.";
+            courses = null;
+            showCourseDataError();
+            return false;
+        }
+        if (!hasTeacherAccess()) return false;
+        if (localStorage.getItem(STORAGE_KEY) !== courseStorageRawValue) {
+            markCourseStorageProblem(localStorage.getItem(STORAGE_KEY));
             return false;
         }
         localStorage.setItem(STORAGE_KEY, serializedCourses);
@@ -116,11 +251,31 @@ function loadCourses() {
             const parsedCourses = JSON.parse(savedData);
 
             if (Array.isArray(parsedCourses)) {
+                const validation = validateCourseCollection(parsedCourses);
+                if (!validation.success) {
+                    courseDataErrorMessage = validation.message ||
+                        "Saved course records failed validation.";
+                    return {
+                        state: validation.state === "changed" || validation.state === "unavailable"
+                            ? validation.state
+                            : "invalid",
+                        courses: null,
+                        rawValue: savedData
+                    };
+                }
+                if (localStorage.getItem(STORAGE_KEY) !== savedData) {
+                    return {
+                        state: "changed",
+                        courses: null,
+                        rawValue: localStorage.getItem(STORAGE_KEY)
+                    };
+                }
                 return { state: "valid", courses: parsedCourses, rawValue: savedData };
             }
         } catch (error) {
             console.error("Could not load saved courses:", error);
         }
+        courseDataErrorMessage = "Saved course data is malformed or is not a JSON array.";
         return { state: "invalid", courses: null, rawValue: savedData };
     }
 
@@ -154,7 +309,7 @@ function showCourseDataError() {
     message.className = "course-data-error";
     message.setAttribute("role", "alert");
     message.textContent = courseDataState === "invalid"
-        ? "Saved course data is malformed or is not a JSON array. The existing value was left unchanged. Course operations are unavailable. Restore a valid JSON array and reload this page."
+        ? `${courseDataErrorMessage || "Saved course data is malformed or contains invalid records."} The existing value was left unchanged. Course operations are unavailable. Correct the data and reload this page.`
         : courseDataState === "changed"
             ? "Course data changed in another tab. No stale changes were written. Reload this page to load the current course list."
             : "Course storage could not be read or initialized safely. No course list changes were made. Check browser storage and reload this page.";
@@ -212,6 +367,7 @@ function removeCourse(courseId) {
     const course = courses.find((item) => item.id === courseId);
 
     if (!course) return;
+    if (window.LearnSpaceTeacherOfferingData?.isOfferingRecord(course)) return;
 
     const confirmed = window.confirm(
         `Are you sure you want to remove "${course.name}"?`
@@ -219,6 +375,7 @@ function removeCourse(courseId) {
 
     if (!confirmed) return;
     if (!canUseCourseList()) return;
+    if (window.LearnSpaceTeacherOfferingData?.isOfferingRecord(course)) return;
 
     const updatedCourses = courses.filter((item) => item.id !== courseId);
     if (!saveCourses(updatedCourses)) return;
@@ -319,10 +476,15 @@ function createCourseCard(course, number) {
         `Remove ${course.name}`
     );
 
-    removeBtn.addEventListener("click", (event) => {
-        event.stopPropagation();
-        removeCourse(course.id);
-    });
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    const isOffering = offeringData?.isOfferingRecord(course) === true;
+    removeBtn.hidden = isOffering;
+    if (!isOffering) {
+        removeBtn.addEventListener("click", (event) => {
+            event.stopPropagation();
+            removeCourse(course.id);
+        });
+    }
 
     card.append(
         label,
@@ -379,14 +541,15 @@ addCourseForm.addEventListener("submit", (event) => {
 // Initialize the dashboard.
 if (!initialTeacherAccess?.allowed || !hasTeacherAccess()) {
     revokeTeacherAccess();
-} else if (courseDataState === "valid") {
-    renderCourses();
 } else {
-    showCourseDataError();
+    if (courseDataState === "valid") renderCourses();
+    else showCourseDataError();
+    if (hasTeacherAccess()) refreshTeacherCurriculum();
 }
 
 function recheckTeacherAccess() {
     if (!hasTeacherAccess()) revokeTeacherAccess();
+    else refreshTeacherCurriculum();
 }
 
 window.addEventListener("focus", recheckTeacherAccess);
@@ -394,6 +557,10 @@ window.addEventListener("pageshow", recheckTeacherAccess);
 window.addEventListener("storage", (event) => {
     if (event.key === STORAGE_KEY) {
         canUseCourseList();
+        return;
+    }
+    if (event.key === CURRICULUM_STORAGE_KEY || event.key === SEMESTER_STORAGE_KEY) {
+        recheckTeacherAccess();
         return;
     }
     if (teacherAccess?.isRelevantStorageChange(event.key)) recheckTeacherAccess();

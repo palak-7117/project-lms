@@ -131,6 +131,61 @@
         return { allowed: false, code };
     }
 
+    // Validate a stored offering's Teacher relationship without granting
+    // page access. Access still requires evaluate() and a valid current session.
+    function validateTeacherIdentity(userId, teacherId) {
+        if (!isNonemptyString(userId) || !isNonemptyString(teacherId)) {
+            return { valid: false, code: "teacher_identity_invalid" };
+        }
+
+        const users = readRecordCollection(USERS_KEY);
+        const teachers = readRecordCollection(TEACHERS_KEY);
+        const students = readRecordCollection(STUDENTS_KEY);
+        for (const collection of [users, teachers, students]) {
+            if (!collection.success) return { valid: false, code: collection.code };
+        }
+
+        const usersValidation = validateUsers(users.records);
+        if (!usersValidation.success) return { valid: false, code: usersValidation.code };
+        const teacherValidation = validateProfiles(teachers.records, "teacher", users.records);
+        if (!teacherValidation.success) return { valid: false, code: teacherValidation.code };
+        const studentValidation = validateProfiles(students.records, "student", users.records);
+        if (!studentValidation.success) return { valid: false, code: studentValidation.code };
+
+        const matchingUsers = users.records.filter((user) => user.id === userId);
+        if (matchingUsers.length !== 1 || matchingUsers[0].role !== "teacher") {
+            return { valid: false, code: "teacher_account_invalid" };
+        }
+        const linkedProfiles = teachers.records.filter((profile) => profile.userId === userId);
+        if (linkedProfiles.length !== 1 || linkedProfiles[0].teacherId !== teacherId) {
+            return { valid: false, code: "teacher_profile_link_invalid" };
+        }
+        if (students.records.some((profile) => profile.userId === userId)) {
+            return { valid: false, code: "cross_role_profile_conflict" };
+        }
+
+        for (const [key, expected] of [
+            [USERS_KEY, users.rawValue],
+            [TEACHERS_KEY, teachers.rawValue],
+            [STUDENTS_KEY, students.rawValue]
+        ]) {
+            try {
+                if (localStorage.getItem(key) !== expected) {
+                    return { valid: false, code: "data_changed_during_check" };
+                }
+            } catch (error) {
+                return { valid: false, code: "storage_unavailable" };
+            }
+        }
+
+        return {
+            valid: true,
+            userId,
+            teacherId,
+            accountActive: matchingUsers[0].accountStatus === "active"
+        };
+    }
+
     function evaluate() {
         let sessionRaw;
         try {
@@ -215,6 +270,7 @@
 
     globalThis.LearnSpaceTeacherAccess = Object.freeze({
         evaluate,
+        validateTeacherIdentity,
         isRelevantStorageChange
     });
 })();

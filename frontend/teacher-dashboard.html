@@ -9,6 +9,7 @@
 
     <link rel="stylesheet" href="style.css">
     <script src="teacher-access.js" defer></script>
+    <script src="teacher-offerings.js" defer></script>
     <script src="teacher-dashboard.js" defer></script>
 </head>
 
@@ -172,6 +173,22 @@
                 </button>
 
             </div>
+        </section>
+
+        <section class="courses-section official-curriculum-section"
+                 aria-labelledby="officialCurriculumTitle">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">ACADEMIC STRUCTURE</p>
+                    <h2 id="officialCurriculumTitle">Official curriculum</h2>
+                </div>
+            </div>
+            <p class="course-modal-intro">
+                View the official subjects and their semester status maintained by Admin.
+            </p>
+            <p class="data-state" id="teacherCurriculumStatus" role="status"
+               aria-live="polite">Loading official curriculum…</p>
+            <div class="course-content-list" id="teacherCurriculumList"></div>
         </section>
     </main>
 
