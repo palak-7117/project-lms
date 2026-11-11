@@ -195,15 +195,56 @@
                     <p class="eyebrow">PEOPLE</p>
                     <h2 id="teachersTitle">Teacher management</h2>
                 </div>
-                <div class="placeholder-panel">
-                    <span class="section-symbol" aria-hidden="true">✦</span>
-                    <div>
-                        <h3>Teacher account workflows are coming later.</h3>
-                        <p>
-                            Account creation and activation controls are not available
-                            yet. Teachers will continue to manage their own course
-                            offerings and course content.
-                        </p>
+                <div class="student-directory-panel">
+                    <p class="data-state" id="teacherDirectoryStatus" role="status"
+                       aria-live="polite">Loading Teacher directory…</p>
+
+                    <div class="student-directory-controls" aria-label="Teacher directory search and filters">
+                        <div class="form-field student-directory-search">
+                            <label for="teacherDirectorySearch">Search by name, email, or Teacher ID</label>
+                            <input id="teacherDirectorySearch" type="search"
+                                   autocomplete="off" placeholder="Search Teachers">
+                        </div>
+                        <div class="form-field">
+                            <label for="teacherAccountStatusFilter">Account status</label>
+                            <select id="teacherAccountStatusFilter">
+                                <option value="">All account statuses</option>
+                                <option value="active">Active</option>
+                                <option value="disabled">Disabled</option>
+                                <option value="pending">Pending</option>
+                                <option value="invalid">Invalid account data</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="teacherProfileStateFilter">Profile state</label>
+                            <select id="teacherProfileStateFilter">
+                                <option value="">All profile states</option>
+                                <option value="valid">Valid profile</option>
+                                <option value="missing">Missing profile</option>
+                                <option value="invalid">Invalid profile</option>
+                            </select>
+                        </div>
+                        <button class="course-reset-button student-filter-reset" id="resetTeacherFilters"
+                                type="button">Clear filters</button>
+                    </div>
+
+                    <p class="directory-result-status" id="teacherDirectoryResults"
+                       role="status" aria-live="polite"></p>
+                    <div class="student-directory-table-wrap">
+                        <table class="student-directory-table">
+                            <caption class="student-directory-caption">Teacher accounts and linked profiles (read only)</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Teacher</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Account status</th>
+                                    <th scope="col">Teacher ID</th>
+                                    <th scope="col">Profile created</th>
+                                    <th scope="col">Profile state</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teacherDirectoryRows"></tbody>
+                        </table>
                     </div>
                 </div>
             </section>

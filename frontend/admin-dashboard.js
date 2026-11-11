@@ -1840,6 +1840,370 @@ function initializeStudentDirectory() {
     renderStudentDirectory();
 }
 
+let teacherDirectoryRecords = [];
+let teacherDirectoryReady = false;
+
+function setTeacherDirectoryMessage(message, state = "") {
+    const status = document.querySelector("#teacherDirectoryStatus");
+    status.textContent = message;
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-warning", state === "warning");
+}
+
+function getTeacherDirectoryFilteredRecords() {
+    const search = document.querySelector("#teacherDirectorySearch").value.trim().toLowerCase();
+    const accountStatus = document.querySelector("#teacherAccountStatusFilter").value;
+    const profileState = document.querySelector("#teacherProfileStateFilter").value;
+
+    return teacherDirectoryRecords.filter((record) => {
+        const searchable = [
+            record.displayName,
+            record.email,
+            record.teacherId
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (search && !searchable.includes(search)) return false;
+        if (accountStatus && record.accountStatusFilter !== accountStatus) return false;
+        if (profileState && record.profileStateFilter !== profileState) return false;
+        return true;
+    });
+}
+
+function renderTeacherDirectoryRows() {
+    const tbody = document.querySelector("#teacherDirectoryRows");
+    const resultStatus = document.querySelector("#teacherDirectoryResults");
+    tbody.replaceChildren();
+    const filteredRecords = getTeacherDirectoryFilteredRecords();
+
+    if (filteredRecords.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.className = "student-directory-empty-cell";
+        cell.colSpan = 6;
+        if (!teacherDirectoryReady) {
+            cell.textContent = "Teacher data is unavailable.";
+        } else if (teacherDirectoryRecords.length === 0) {
+            cell.textContent = "No Teacher accounts or orphan Teacher profiles exist.";
+        } else {
+            cell.textContent = "No Teachers match the current search and filters.";
+        }
+        row.append(cell);
+        tbody.append(row);
+    } else {
+        for (const record of filteredRecords) {
+            const row = document.createElement("tr");
+            const nameCell = document.createElement("td");
+            const emailCell = document.createElement("td");
+            const teacherIdCell = document.createElement("td");
+            const createdCell = document.createElement("td");
+
+            nameCell.textContent = record.displayName;
+            emailCell.textContent = record.email;
+            teacherIdCell.textContent = record.teacherId;
+            createdCell.textContent = record.createdAt;
+            row.append(nameCell, emailCell);
+            appendDirectoryStatusCell(row, record.accountStatusLabel, record.accountStatusFilter);
+            row.append(teacherIdCell, createdCell);
+            appendDirectoryStatusCell(row, record.profileStateLabel, record.profileStateFilter);
+            tbody.append(row);
+        }
+    }
+
+    if (!teacherDirectoryReady) {
+        resultStatus.textContent = "";
+    } else if (teacherDirectoryRecords.length === 0) {
+        resultStatus.textContent = "";
+    } else {
+        resultStatus.textContent = `Showing ${filteredRecords.length} of ${teacherDirectoryRecords.length} Teacher directory record${teacherDirectoryRecords.length === 1 ? "" : "s"}.`;
+    }
+}
+
+function renderTeacherDirectory() {
+    teacherDirectoryReady = false;
+    teacherDirectoryRecords = [];
+    let usersState;
+    let teachersState;
+    let studentsState;
+    const adminData = window.LearnSpaceAdminData;
+
+    try {
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        teachersState = adminData.readArrayFromStorage(TEACHER_STORAGE_KEY);
+        studentsState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+    } catch (error) {
+        setTeacherDirectoryMessage("Teacher, account, or Student profile data could not be read safely.", "error");
+        renderTeacherDirectoryRows();
+        return;
+    }
+
+    const users = usersState.state === "missing" ? [] : usersState.records;
+    const teacherProfiles = teachersState.state === "missing" ? [] : teachersState.records;
+    if ((!isReadableArrayState(usersState.state) && usersState.state !== "missing") ||
+        (!isReadableArrayState(teachersState.state) && teachersState.state !== "missing")) {
+        const details = !isReadableArrayState(usersState.state) && usersState.state !== "missing"
+            ? usersState.message || "Account data is malformed or unavailable."
+            : teachersState.message || "Teacher profile data is malformed or unavailable.";
+        setTeacherDirectoryMessage(`${details} The Teacher directory cannot be verified.`, "error");
+        renderTeacherDirectoryRows();
+        return;
+    }
+
+    const usersValidation = adminData.validateUsers(users);
+    const teacherProfilesValidation = adminData.validateProfiles(
+        teacherProfiles,
+        "teacher",
+        users
+    );
+    const studentProfilesReadable = studentsState.state === "missing" ||
+        isReadableArrayState(studentsState.state);
+    const studentProfiles = studentsState.state === "missing" ? [] :
+        studentProfilesReadable ? studentsState.records : [];
+    const studentProfilesValidation = studentProfilesReadable
+        ? adminData.validateProfiles(studentProfiles, "student", users)
+        : { success: false, message: "Student profile data is malformed or unavailable." };
+    // Any readable array can be scanned for userId conflicts, even when one of
+    // its profile records is otherwise invalid. A malformed whole collection
+    // cannot be checked and must not be treated as conflict-free.
+    const crossRoleLinksVerified = studentProfilesReadable;
+
+    const accountIdCounts = new Map();
+    const accountEmailCounts = new Map();
+    for (const user of users) {
+        if (!user || typeof user !== "object" || Array.isArray(user)) continue;
+        if (typeof user.id === "string" && user.id.trim()) {
+            accountIdCounts.set(user.id, (accountIdCounts.get(user.id) || 0) + 1);
+        }
+        const normalizedEmail = String(user.email || "").trim().toLowerCase().replace(/[\r\n]/g, "");
+        if (normalizedEmail) {
+            accountEmailCounts.set(normalizedEmail, (accountEmailCounts.get(normalizedEmail) || 0) + 1);
+        }
+    }
+
+    const teacherIdCounts = new Map();
+    const profileUserIdCounts = new Map();
+    for (const profile of teacherProfiles) {
+        if (!profile || typeof profile !== "object" || Array.isArray(profile)) continue;
+        if (typeof profile.teacherId === "string" && profile.teacherId.trim()) {
+            teacherIdCounts.set(profile.teacherId, (teacherIdCounts.get(profile.teacherId) || 0) + 1);
+        }
+        if (typeof profile.userId === "string" && profile.userId.trim()) {
+            profileUserIdCounts.set(profile.userId, (profileUserIdCounts.get(profile.userId) || 0) + 1);
+        }
+    }
+
+    const studentLinkedUserIds = new Set();
+    for (const profile of studentProfiles) {
+        if (profile && typeof profile === "object" && !Array.isArray(profile) &&
+            typeof profile.userId === "string" && profile.userId.trim()) {
+            studentLinkedUserIds.add(profile.userId);
+        }
+    }
+
+    const teachersByUserId = new Map();
+    for (const profile of teacherProfiles) {
+        if (!profile || typeof profile !== "object" || Array.isArray(profile) ||
+            typeof profile.userId !== "string" || !profile.userId.trim()) continue;
+        if (!teachersByUserId.has(profile.userId)) teachersByUserId.set(profile.userId, []);
+        teachersByUserId.get(profile.userId).push(profile);
+    }
+
+    const directoryAccounts = users.filter((user) =>
+        user && typeof user === "object" && !Array.isArray(user) && user.role === "teacher"
+    );
+    const knownTeacherProfileObjects = new Set();
+
+    for (const user of directoryAccounts) {
+        const displayName = typeof user.name === "string" && user.name.trim()
+            ? user.name.trim()
+            : typeof user.email === "string" && user.email.trim()
+                ? user.email.trim()
+                : "Name unavailable";
+        const email = typeof user.email === "string" && user.email.trim()
+            ? user.email.trim()
+            : "Email unavailable";
+        const normalizedEmail = String(user.email || "").trim().toLowerCase().replace(/[\r\n]/g, "");
+        const accountRecordValidation = adminData.validateUsers([user]);
+        const accountValid = accountRecordValidation.success &&
+            accountIdCounts.get(user.id) === 1 &&
+            accountEmailCounts.get(normalizedEmail) === 1;
+        const linkedProfiles = typeof user.id === "string"
+            ? teachersByUserId.get(user.id) || []
+            : [];
+        const crossRoleConflict = typeof user.id === "string" && studentLinkedUserIds.has(user.id);
+        const accountConflict = !accountValid || accountIdCounts.get(user.id) > 1;
+
+        if (linkedProfiles.length === 0) {
+            let profileState = "missing";
+            let reason = "No Teacher profile is linked to this account.";
+            if (crossRoleConflict) {
+                profileState = "invalid";
+                reason = "This account is also linked to a Student profile.";
+            } else if (!crossRoleLinksVerified) {
+                profileState = "invalid";
+                reason = "Cross-role profile links could not be verified.";
+            } else if (accountConflict) {
+                profileState = "invalid";
+                reason = "The account has conflicting or invalid account data.";
+            }
+            teacherDirectoryRecords.push({
+                displayName,
+                email,
+                accountStatusLabel: accountValid ? user.accountStatus :
+                    `Invalid account data${user.accountStatus ? ` (${user.accountStatus})` : ""}`,
+                accountStatusFilter: accountValid ? user.accountStatus : "invalid",
+                teacherId: "—",
+                createdAt: "—",
+                profileStateLabel: profileState === "missing" ? "Missing profile" : `Invalid profile — ${reason}`,
+                profileStateFilter: profileState
+            });
+            continue;
+        }
+
+        for (const profile of linkedProfiles) {
+            knownTeacherProfileObjects.add(profile);
+            const profileValidation = adminData.validateProfiles([profile], "teacher", [user]);
+            const duplicateTeacherId = typeof profile.teacherId === "string" &&
+                teacherIdCounts.get(profile.teacherId) > 1;
+            const duplicateProfileLink = profileUserIdCounts.get(user.id) > 1;
+            let profileValid = profileValidation.success && !duplicateTeacherId &&
+                !duplicateProfileLink && !crossRoleConflict && crossRoleLinksVerified &&
+                accountValid;
+            let profileReason = "";
+            if (crossRoleConflict) {
+                profileReason = "Account is also linked to a Student profile.";
+            } else if (!crossRoleLinksVerified) {
+                profileReason = "Cross-role profile links could not be verified.";
+            } else if (accountConflict) {
+                profileReason = "Linked account data is invalid or duplicated.";
+            } else if (duplicateTeacherId) {
+                profileReason = "Teacher ID is duplicated.";
+            } else if (duplicateProfileLink) {
+                profileReason = "Multiple Teacher profiles link to this account.";
+            } else if (!profileValidation.success) {
+                profileReason = profileValidation.message;
+            }
+
+            const createdAt = profile.createdAt && hasValidCreatedAt(profile.createdAt)
+                ? new Date(profile.createdAt).toLocaleDateString()
+                : "Unavailable";
+            teacherDirectoryRecords.push({
+                displayName,
+                email,
+                accountStatusLabel: accountValid ? user.accountStatus :
+                    `Invalid account data${user.accountStatus ? ` (${user.accountStatus})` : ""}`,
+                accountStatusFilter: accountValid ? user.accountStatus : "invalid",
+                teacherId: typeof profile.teacherId === "string" && profile.teacherId.trim()
+                    ? profile.teacherId
+                    : "Unavailable",
+                createdAt,
+                profileStateLabel: profileValid ? "Valid profile" : `Invalid profile — ${profileReason || "Profile data is invalid."}`,
+                profileStateFilter: profileValid ? "valid" : "invalid"
+            });
+        }
+    }
+
+    for (const [index, profile] of teacherProfiles.entries()) {
+        if (knownTeacherProfileObjects.has(profile)) continue;
+        const isObject = profile && typeof profile === "object" && !Array.isArray(profile);
+        const matchingAccounts = isObject && typeof profile.userId === "string"
+            ? users.filter((user) => user && typeof user === "object" && user.id === profile.userId)
+            : [];
+        const matchingTeacherAccounts = matchingAccounts.filter((user) => user.role === "teacher");
+        const linkedAccount = matchingAccounts[0];
+        const crossRoleConflict = isObject && typeof profile.userId === "string" &&
+            studentLinkedUserIds.has(profile.userId);
+        const profileValidation = isObject && matchingTeacherAccounts.length === 1
+            ? adminData.validateProfiles([profile], "teacher", [matchingTeacherAccounts[0]])
+            : { success: false, message: crossRoleConflict
+                ? "Account is also linked to a Student profile."
+                : matchingAccounts.length
+                    ? "Teacher profile links to an account with a different role or duplicate ID."
+                    : "Teacher profile has no linked account." };
+        const teacherId = isObject && typeof profile.teacherId === "string" && profile.teacherId.trim()
+            ? profile.teacherId
+            : "Unavailable";
+        const createdAt = isObject && hasValidCreatedAt(profile.createdAt)
+            ? new Date(profile.createdAt).toLocaleDateString()
+            : "Unavailable";
+        teacherDirectoryRecords.push({
+            displayName: isObject ? "Orphan Teacher profile" : `Invalid Teacher profile record ${index + 1}`,
+            email: linkedAccount && typeof linkedAccount.email === "string"
+                ? linkedAccount.email
+                : isObject && typeof profile.userId === "string"
+                    ? `No Teacher account (${profile.userId})`
+                    : "Account unavailable",
+            accountStatusLabel: linkedAccount && linkedAccount.role === "teacher"
+                ? linkedAccount.accountStatus
+                : "No linked Teacher account",
+            accountStatusFilter: linkedAccount && linkedAccount.role === "teacher"
+                ? linkedAccount.accountStatus
+                : "invalid",
+            teacherId,
+            createdAt,
+            profileStateLabel: `Invalid profile — ${crossRoleConflict
+                ? "Account is also linked to a Student profile."
+                : !crossRoleLinksVerified
+                    ? "Cross-role profile links could not be verified."
+                    : profileValidation.message}`,
+            profileStateFilter: "invalid"
+        });
+    }
+
+    const invalidAccountRecords = users.filter((user) =>
+        !user || typeof user !== "object" || Array.isArray(user) ||
+        !["student", "teacher", "admin"].includes(user.role)
+    );
+    for (const [index] of invalidAccountRecords.entries()) {
+        teacherDirectoryRecords.push({
+            displayName: `Unclassified account record ${index + 1}`,
+            email: "Unavailable",
+            accountStatusLabel: "Invalid account data",
+            accountStatusFilter: "invalid",
+            teacherId: "—",
+            createdAt: "—",
+            profileStateLabel: "Invalid profile — account role could not be verified.",
+            profileStateFilter: "invalid"
+        });
+    }
+
+    teacherDirectoryReady = true;
+    const attentionCount = teacherDirectoryRecords.filter((record) =>
+        record.accountStatusFilter === "invalid" ||
+        record.profileStateFilter === "invalid" ||
+        record.profileStateFilter === "missing"
+    ).length;
+    const messages = [];
+    if (!usersValidation.success) messages.push(`Account collection contains invalid or conflicting records: ${usersValidation.message}`);
+    if (!teacherProfilesValidation.success) messages.push(`Teacher profile collection contains invalid or conflicting records: ${teacherProfilesValidation.message}`);
+    if (studentProfilesReadable && !studentProfilesValidation.success) {
+        messages.push(`Student profiles contain invalid records; readable user links were checked for cross-role conflicts. ${studentProfilesValidation.message}`);
+    }
+    if (!crossRoleLinksVerified) messages.push("Student profile data could not be fully validated, so cross-role links are marked invalid until checked.");
+    if (attentionCount > 0) messages.push(`${attentionCount} directory record${attentionCount === 1 ? " requires" : "s require"} administrative attention.`);
+    if (directoryAccounts.length === 0 && teacherProfiles.length === 0 && invalidAccountRecords.length === 0) {
+        messages.push("No Teacher accounts exist.");
+    }
+    setTeacherDirectoryMessage(
+        messages.length ? messages.join(" ") : `Showing ${directoryAccounts.length} validated Teacher account${directoryAccounts.length === 1 ? "" : "s"}.`,
+        attentionCount > 0 || !usersValidation.success || !teacherProfilesValidation.success || !crossRoleLinksVerified
+            ? "warning"
+            : ""
+    );
+    renderTeacherDirectoryRows();
+}
+
+function initializeTeacherDirectory() {
+    document.querySelector("#teacherDirectorySearch").addEventListener("input", renderTeacherDirectoryRows);
+    document.querySelector("#teacherAccountStatusFilter").addEventListener("change", renderTeacherDirectoryRows);
+    document.querySelector("#teacherProfileStateFilter").addEventListener("change", renderTeacherDirectoryRows);
+    document.querySelector("#resetTeacherFilters").addEventListener("click", () => {
+        document.querySelector("#teacherDirectorySearch").value = "";
+        document.querySelector("#teacherAccountStatusFilter").value = "";
+        document.querySelector("#teacherProfileStateFilter").value = "";
+        renderTeacherDirectoryRows();
+    });
+    renderTeacherDirectory();
+}
+
 function getDemoSessionMessage(usersState) {
     let savedSession;
 
@@ -3309,3 +3673,4 @@ renderAcademicStructure();
 initializeCourseForm();
 initializeSemesterForm();
 initializeStudentDirectory();
+initializeTeacherDirectory();
