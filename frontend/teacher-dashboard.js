@@ -19,7 +19,7 @@ function hasTeacherAccess() {
 
 function revokeTeacherAccess() {
     teacherAccessRevoked = true;
-    if (courseModalBackdrop) courseModalBackdrop.hidden = true;
+    if (offeringModalBackdrop) offeringModalBackdrop.hidden = true;
     if (courseGrid) {
         courseGrid.replaceChildren();
         const message = document.createElement("p");
@@ -28,7 +28,7 @@ function revokeTeacherAccess() {
         message.textContent = "Teacher access is no longer available. Sign in again after your account is active.";
         courseGrid.append(message);
     }
-    if (addCourseBtn) addCourseBtn.disabled = true;
+    if (addOfferingBtn) addOfferingBtn.disabled = true;
     setTeacherCurriculumState("Teacher access is no longer available.", true);
 }
 
@@ -37,16 +37,16 @@ const courseCount = document.querySelector("#courseCount");
 const teacherCurriculumStatus = document.querySelector("#teacherCurriculumStatus");
 const teacherCurriculumList = document.querySelector("#teacherCurriculumList");
 
-const addCourseBtn = document.querySelector("#addCourseBtn");
-const courseModalBackdrop = document.querySelector("#courseModalBackdrop");
-const closeCourseModal = document.querySelector("#closeCourseModal");
-const cancelCourseBtn = document.querySelector("#cancelCourseBtn");
-
-const addCourseForm = document.querySelector("#addCourseForm");
-const newCourseName = document.querySelector("#newCourseName");
-const newInstructorName = document.querySelector("#newInstructorName");
-const newCourseDescription = document.querySelector("#newCourseDescription");
-const courseFormMessage = document.querySelector("#courseFormMessage");
+const addOfferingBtn = document.querySelector("#addOfferingBtn");
+const offeringModalBackdrop = document.querySelector("#offeringModalBackdrop");
+const closeOfferingModal = document.querySelector("#closeOfferingModal");
+const cancelOfferingBtn = document.querySelector("#cancelOfferingBtn");
+const offeringForm = document.querySelector("#offeringForm");
+const offeringSubjectId = document.querySelector("#offeringSubjectId");
+const offeringDescription = document.querySelector("#offeringDescription");
+const offeringFormMessage = document.querySelector("#offeringFormMessage");
+const offeringModalTitle = document.querySelector("#offeringModalTitle");
+const saveOfferingBtn = document.querySelector("#saveOfferingBtn");
 
 function readOfficialCollection(storageKey, label) {
     let rawValue;
@@ -167,7 +167,8 @@ function validateCourseCollection(records) {
 
 // Read the original sample courses from HTML on first use.
 function getInitialCoursesFromHTML() {
-    const cards = courseGrid.querySelectorAll(".teacher-course-card");
+    const cards = document.querySelector("#initialCourseSamples")
+        .querySelectorAll(".teacher-course-card");
 
     return Array.from(cards).map((card) => ({
         id: crypto.randomUUID(),
@@ -303,7 +304,7 @@ function canUseCourseList() {
 }
 
 function showCourseDataError() {
-    addCourseBtn.disabled = true;
+    addOfferingBtn.disabled = true;
     courseCount.textContent = "Unavailable";
     const message = document.createElement("p");
     message.className = "course-data-error";
@@ -322,244 +323,319 @@ courseDataState = courseLoadResult.state;
 courses = courseLoadResult.courses;
 courseStorageRawValue = courseLoadResult.rawValue;
 
-// Update the displayed course count.
-function updateCourseCount() {
-    const totalCourses = courses.length;
-
-    courseCount.textContent =
-        `${totalCourses} ${totalCourses === 1 ? "course" : "courses"}`;
+function getOfferingSnapshot() {
+    if (!hasTeacherAccess()) return { success: false, message: "Teacher access is unavailable." };
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    if (!offeringData || typeof offeringData.readAndValidateOfferings !== "function") {
+        return { success: false, message: "Offering validation is unavailable." };
+    }
+    const snapshot = offeringData.readAndValidateOfferings();
+    if (!snapshot.success) return snapshot;
+    const currentAccess = teacherAccess.evaluate();
+    if (currentAccess.userId !== snapshot.identity.userId || currentAccess.teacherId !== snapshot.identity.teacherId) {
+        return { success: false, message: "Teacher identity changed. Reload before continuing." };
+    }
+    return snapshot;
 }
 
-// Update course numbering.
-function updateCourseLabels() {
-    const cards = courseGrid.querySelectorAll(".teacher-course-card");
-
-    cards.forEach((card, index) => {
-        const label = card.querySelector(".course-label");
-
-        if (label) {
-            label.textContent =
-                `COURSE ${String(index + 1).padStart(2, "0")}`;
-        }
-    });
-}
-
-// Render all courses from the current course list.
-function renderCourses() {
-    if (!canUseCourseList()) return;
-    courseGrid.querySelectorAll(".teacher-course-card").forEach((card) => {
-        card.remove();
-    });
-
-    courses.forEach((course, index) => {
-        const card = createCourseCard(course, index + 1);
-
-        courseGrid.insertBefore(card, addCourseBtn);
-    });
-
-    updateCourseLabels();
-    updateCourseCount();
-}
-
-// Remove a course and save the change.
-function removeCourse(courseId) {
-    if (!canUseCourseList()) return;
-    const course = courses.find((item) => item.id === courseId);
-
-    if (!course) return;
-    if (window.LearnSpaceTeacherOfferingData?.isOfferingRecord(course)) return;
-
-    const confirmed = window.confirm(
-        `Are you sure you want to remove "${course.name}"?`
+function getOwnedOfferings(snapshot) {
+    return snapshot.records.filter((record) =>
+        window.LearnSpaceTeacherOfferingData.isOfferingRecord(record) &&
+        record.teacherUserId === snapshot.identity.userId &&
+        record.teacherId === snapshot.identity.teacherId
     );
-
-    if (!confirmed) return;
-    if (!canUseCourseList()) return;
-    if (window.LearnSpaceTeacherOfferingData?.isOfferingRecord(course)) return;
-
-    const updatedCourses = courses.filter((item) => item.id !== courseId);
-    if (!saveCourses(updatedCourses)) return;
-    courses = updatedCourses;
-    renderCourses();
 }
 
-// Open the Add Course modal.
-function openCourseModal() {
-    if (!canUseCourseList()) return;
-    addCourseForm.reset();
-    courseFormMessage.textContent = "";
-
-    courseModalBackdrop.hidden = false;
-    courseModalBackdrop.classList.remove("is-visible");
-
-    void courseModalBackdrop.offsetWidth;
-
-    requestAnimationFrame(() => {
-        courseModalBackdrop.classList.add("is-visible");
-        newCourseName.focus();
+function eligibleSubjects(snapshot) {
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    const semesterValidation = offeringData.validateSemesters(snapshot.semesters, snapshot.curriculumCourses);
+    if (!semesterValidation.success) return [];
+    const ownedIds = new Set(getOwnedOfferings(snapshot).map((item) => item.curriculumCourseId));
+    const semesterBySubject = new Map();
+    snapshot.semesters.forEach((semester) => {
+        semester.curriculumCourseIds.forEach((id) => semesterBySubject.set(id, semester));
     });
+    return snapshot.curriculumCourses.filter((subject) =>
+        semesterBySubject.get(subject.id)?.status === "active" && !ownedIds.has(subject.id)
+    );
 }
 
-// Close the Add Course modal with its existing animation.
-function closeCourseForm() {
-    if (courseModalBackdrop.hidden) return;
-
-    courseModalBackdrop.classList.remove("is-visible");
-
-    window.setTimeout(() => {
-        courseModalBackdrop.hidden = true;
-        courseFormMessage.textContent = "";
-        addCourseForm.reset();
-        if (hasTeacherAccess()) addCourseBtn.focus();
-    }, 450);
+function showOfferingDirectoryError(message) {
+    courseGrid.replaceChildren();
+    courseCount.textContent = "Unavailable";
+    addOfferingBtn.disabled = true;
+    const alert = document.createElement("p");
+    alert.className = "course-data-error";
+    alert.setAttribute("role", "alert");
+    alert.textContent = message || "Offering data could not be validated safely.";
+    courseGrid.append(alert, addOfferingBtn);
 }
 
-// Modal event listeners.
-addCourseBtn.addEventListener("click", openCourseModal);
-closeCourseModal.addEventListener("click", closeCourseForm);
-cancelCourseBtn.addEventListener("click", closeCourseForm);
-
-courseModalBackdrop.addEventListener("click", (event) => {
-    if (event.target === courseModalBackdrop) {
-        closeCourseForm();
-    }
-});
-
-document.addEventListener("keydown", (event) => {
-    if (
-        event.key === "Escape" &&
-        !courseModalBackdrop.hidden &&
-        courseModalBackdrop.classList.contains("is-visible")
-    ) {
-        closeCourseForm();
-    }
-});
-
-// Create a course card dynamically.
-function createCourseCard(course, number) {
+function createOfferingCard(offering, subject, semester, number) {
     const card = document.createElement("article");
     card.className = "teacher-course-card";
-
     const label = document.createElement("p");
     label.className = "course-label";
-    label.textContent = `COURSE ${String(number).padStart(2, "0")}`;
-
+    label.textContent = "OFFERING " + String(number).padStart(2, "0");
     const symbol = document.createElement("div");
     symbol.className = "course-symbol";
     symbol.textContent = "✳";
-
     const title = document.createElement("h3");
-    title.textContent = course.name;
-
-    const descriptionText = document.createElement("p");
-    descriptionText.className = "course-description";
-    descriptionText.textContent = course.description;
-
+    title.textContent = subject.name;
+    const details = document.createElement("p");
+    details.className = "course-description";
+    details.textContent = subject.code + " · " + semester.name + " · " + semester.academicYear + " · " +
+        (semester.status === "active" ? "Active" : "Inactive");
+    const description = document.createElement("p");
+    description.className = "course-description";
+    description.textContent = offering.description;
     const footer = document.createElement("div");
     footer.className = "course-card-footer";
-
-    const manageText = document.createElement("span");
-    manageText.textContent = "Manage course";
-
+    const footerText = document.createElement("span");
+    footerText.textContent = "Open offering workspace";
     const arrow = document.createElement("span");
     arrow.className = "course-arrow";
     arrow.textContent = "→";
-
-    footer.append(manageText, arrow);
-
-    const removeBtn = document.createElement("button");
-    removeBtn.type = "button";
-    removeBtn.className = "remove-course-btn";
-    removeBtn.textContent = "Remove";
-    removeBtn.setAttribute(
-        "aria-label",
-        `Remove ${course.name}`
-    );
-
-    const offeringData = window.LearnSpaceTeacherOfferingData;
-    const isOffering = offeringData?.isOfferingRecord(course) === true;
-    removeBtn.hidden = isOffering;
-    if (!isOffering) {
-        removeBtn.addEventListener("click", (event) => {
-            event.stopPropagation();
-            removeCourse(course.id);
-        });
-    }
-
-    card.append(
-        label,
-        symbol,
-        title,
-        descriptionText,
-        footer,
-        removeBtn
-    );
-
-    // Clicking the card opens the matching course workspace.
-    card.addEventListener("click", (event) => {
-        if (!hasTeacherAccess()) return;
-        if (event.target.closest("button")) return;
-
-        window.location.href =
-            `course-detail.html?id=${encodeURIComponent(course.id)}`;
+    footer.append(footerText, arrow);
+    const edit = document.createElement("button");
+    edit.type = "button";
+    edit.className = "cancel-course-btn";
+    edit.textContent = "Edit description";
+    edit.addEventListener("click", (event) => {
+        event.stopPropagation();
+        openEditOffering(offering.id);
     });
-
+    const remove = document.createElement("button");
+    remove.type = "button";
+    remove.className = "remove-course-btn";
+    remove.textContent = "Delete offering";
+    remove.addEventListener("click", (event) => {
+        event.stopPropagation();
+        confirmDeleteOffering(offering.id, JSON.stringify(offering));
+    });
+    card.append(label, symbol, title, details, description, footer, edit, remove);
+    card.addEventListener("click", (event) => {
+        if (!hasTeacherAccess() || event.target.closest("button")) return;
+        window.location.href = "course-detail.html?id=" + encodeURIComponent(offering.id);
+    });
     return card;
 }
 
-// Handle creation of a new course.
-addCourseForm.addEventListener("submit", (event) => {
-    event.preventDefault();
-    if (!canUseCourseList()) return;
-
-    const name = newCourseName.value.trim();
-    const instructor = newInstructorName.value.trim();
-    const description = newCourseDescription.value.trim();
-
-    if (!name || !instructor || !description) {
-        courseFormMessage.textContent =
-            "Please fill in all three fields.";
+function renderOfferingDirectory() {
+    if (!hasTeacherAccess()) return;
+    const snapshot = getOfferingSnapshot();
+    if (!snapshot.success) {
+        showOfferingDirectoryError(snapshot.message);
         return;
     }
+    courses = snapshot.records;
+    courseStorageRawValue = snapshot.rawValues.courses;
+    courseDataState = "valid";
+    courseGrid.replaceChildren();
+    const owned = getOwnedOfferings(snapshot);
+    const subjects = new Map(snapshot.curriculumCourses.map((item) => [item.id, item]));
+    const semesterBySubject = new Map();
+    snapshot.semesters.forEach((semester) => {
+        semester.curriculumCourseIds.forEach((id) => semesterBySubject.set(id, semester));
+    });
+    owned.forEach((offering, index) => {
+        courseGrid.append(createOfferingCard(
+            offering,
+            subjects.get(offering.curriculumCourseId),
+            semesterBySubject.get(offering.curriculumCourseId),
+            index + 1
+        ));
+    });
+    if (owned.length === 0) {
+        const empty = document.createElement("p");
+        empty.className = "course-empty-state";
+        empty.textContent = "You have no offerings yet. Choose an active official subject to create one.";
+        courseGrid.append(empty);
+    }
+    courseCount.textContent = owned.length + " " + (owned.length === 1 ? "offering" : "offerings");
+    addOfferingBtn.disabled = eligibleSubjects(snapshot).length === 0;
+    courseGrid.append(addOfferingBtn);
+}
 
-    const course = {
-        id: crypto.randomUUID(),
-        name: name,
-        instructor: instructor,
-        description: description
-    };
+let offeringFormMode = "create";
+let editingOfferingId = null;
+let editingOfferingSnapshot = null;
 
-    const updatedCourses = [...courses, course];
-    if (!canUseCourseList() || !saveCourses(updatedCourses)) return;
-    courses = updatedCourses;
-    renderCourses();
-    closeCourseForm();
+function showOfferingFormError(message) {
+    offeringFormMessage.textContent = message;
+    offeringFormMessage.classList.add("error");
+}
 
-    console.log("Course created:", course);
+function showOfferingModal() {
+    offeringModalBackdrop.hidden = false;
+    offeringModalBackdrop.classList.remove("is-visible");
+    void offeringModalBackdrop.offsetWidth;
+    requestAnimationFrame(() => {
+        offeringModalBackdrop.classList.add("is-visible");
+        (offeringFormMode === "create" ? offeringSubjectId : offeringDescription).focus();
+    });
+}
+
+function openCreateOffering() {
+    if (!hasTeacherAccess()) return;
+    const snapshot = getOfferingSnapshot();
+    if (!snapshot.success) {
+        window.alert(snapshot.message || "Offering data could not be validated safely.");
+        return;
+    }
+    offeringForm.reset();
+    offeringFormMessage.textContent = "";
+    offeringFormMessage.classList.remove("error");
+    offeringSubjectId.replaceChildren();
+    offeringSubjectId.disabled = false;
+    offeringFormMode = "create";
+    editingOfferingId = null;
+    editingOfferingSnapshot = null;
+    offeringModalTitle.textContent = "Create an offering.";
+    saveOfferingBtn.textContent = "Create offering";
+    const available = eligibleSubjects(snapshot);
+    available.forEach((subject) => {
+        const semester = snapshot.semesters.find((item) => item.curriculumCourseIds.includes(subject.id));
+        const option = document.createElement("option");
+        option.value = subject.id;
+        option.textContent = subject.code + " — " + subject.name + " (" + semester.name + ", " + semester.academicYear + ")";
+        offeringSubjectId.append(option);
+    });
+    offeringDescription.value = available[0]?.description || "";
+    saveOfferingBtn.disabled = available.length === 0;
+    if (available.length === 0) showOfferingFormError("No active, unassigned official subjects are available to offer.");
+    showOfferingModal();
+}
+
+function openEditOffering(offeringId) {
+    if (!hasTeacherAccess()) return;
+    const snapshot = getOfferingSnapshot();
+    if (!snapshot.success) {
+        window.alert(snapshot.message || "Offering data could not be validated safely.");
+        return;
+    }
+    const offering = getOwnedOfferings(snapshot).find((item) => item.id === offeringId);
+    if (!offering) {
+        window.alert("This offering is no longer available to your account.");
+        renderOfferingDirectory();
+        return;
+    }
+    const subject = snapshot.curriculumCourses.find((item) => item.id === offering.curriculumCourseId);
+    if (!subject) return;
+    offeringForm.reset();
+    offeringFormMessage.textContent = "";
+    offeringFormMessage.classList.remove("error");
+    offeringSubjectId.replaceChildren();
+    const option = document.createElement("option");
+    option.value = subject.id;
+    option.textContent = subject.code + " — " + subject.name;
+    offeringSubjectId.append(option);
+    offeringSubjectId.disabled = true;
+    offeringDescription.value = offering.description;
+    offeringFormMode = "edit";
+    editingOfferingId = offering.id;
+    editingOfferingSnapshot = JSON.stringify(offering);
+    offeringModalTitle.textContent = "Edit offering description.";
+    saveOfferingBtn.textContent = "Save changes";
+    saveOfferingBtn.disabled = false;
+    showOfferingModal();
+}
+
+function closeOfferingForm() {
+    if (offeringModalBackdrop.hidden) return;
+    offeringModalBackdrop.classList.remove("is-visible");
+    window.setTimeout(() => {
+        offeringModalBackdrop.hidden = true;
+        offeringForm.reset();
+        offeringSubjectId.disabled = false;
+        saveOfferingBtn.disabled = false;
+        offeringFormMessage.textContent = "";
+        if (hasTeacherAccess()) addOfferingBtn.focus();
+    }, 450);
+}
+
+function confirmDeleteOffering(offeringId, expectedSnapshot) {
+    if (!hasTeacherAccess()) return;
+    const snapshot = getOfferingSnapshot();
+    const offering = snapshot.success
+        ? getOwnedOfferings(snapshot).find((item) => item.id === offeringId)
+        : null;
+    if (!offering || JSON.stringify(offering) !== expectedSnapshot) {
+        window.alert(snapshot.message || "This offering changed or is no longer owned by your account.");
+        renderOfferingDirectory();
+        return;
+    }
+    const subject = snapshot.curriculumCourses.find((item) => item.id === offering.curriculumCourseId);
+    const confirmed = window.confirm(
+        "Permanently delete “" + (subject?.name || offering.name) +
+        "” and all associated course content, including materials, assignments, quizzes, and student submissions? This cannot be undone."
+    );
+    if (!confirmed || !hasTeacherAccess()) return;
+    const result = window.LearnSpaceTeacherOfferingData.deleteOffering(offeringId, expectedSnapshot);
+    if (!result.success) {
+        window.alert(result.message || "The offering could not be deleted safely.");
+    }
+    renderOfferingDirectory();
+}
+
+addOfferingBtn.addEventListener("click", openCreateOffering);
+closeOfferingModal.addEventListener("click", closeOfferingForm);
+cancelOfferingBtn.addEventListener("click", closeOfferingForm);
+offeringModalBackdrop.addEventListener("click", (event) => {
+    if (event.target === offeringModalBackdrop) closeOfferingForm();
+});
+offeringSubjectId.addEventListener("change", () => {
+    if (offeringFormMode !== "create") return;
+    const snapshot = getOfferingSnapshot();
+    const subject = snapshot.success
+        ? snapshot.curriculumCourses.find((item) => item.id === offeringSubjectId.value)
+        : null;
+    if (subject) offeringDescription.value = subject.description;
+});
+document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !offeringModalBackdrop.hidden &&
+        offeringModalBackdrop.classList.contains("is-visible")) closeOfferingForm();
+});
+offeringForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    if (!hasTeacherAccess()) return;
+    const result = offeringFormMode === "create"
+        ? window.LearnSpaceTeacherOfferingData.createOffering(offeringSubjectId.value, offeringDescription.value)
+        : window.LearnSpaceTeacherOfferingData.updateOfferingDescription(
+            editingOfferingId,
+            editingOfferingSnapshot,
+            offeringDescription.value
+        );
+    if (!result.success) {
+        showOfferingFormError(result.message || "The offering could not be saved safely.");
+        return;
+    }
+    closeOfferingForm();
+    renderOfferingDirectory();
 });
 
-// Initialize the dashboard.
+// Initialize the Teacher's owned offering directory.
 if (!initialTeacherAccess?.allowed || !hasTeacherAccess()) {
     revokeTeacherAccess();
 } else {
-    if (courseDataState === "valid") renderCourses();
+    if (courseDataState === "valid") renderOfferingDirectory();
     else showCourseDataError();
     if (hasTeacherAccess()) refreshTeacherCurriculum();
 }
 
 function recheckTeacherAccess() {
-    if (!hasTeacherAccess()) revokeTeacherAccess();
-    else refreshTeacherCurriculum();
+    if (!hasTeacherAccess()) {
+        revokeTeacherAccess();
+        return;
+    }
+    renderOfferingDirectory();
+    refreshTeacherCurriculum();
 }
 
 window.addEventListener("focus", recheckTeacherAccess);
 window.addEventListener("pageshow", recheckTeacherAccess);
 window.addEventListener("storage", (event) => {
-    if (event.key === STORAGE_KEY) {
-        canUseCourseList();
-        return;
-    }
-    if (event.key === CURRICULUM_STORAGE_KEY || event.key === SEMESTER_STORAGE_KEY) {
+    if (event.key === STORAGE_KEY || event.key === CURRICULUM_STORAGE_KEY || event.key === SEMESTER_STORAGE_KEY) {
         recheckTeacherAccess();
         return;
     }

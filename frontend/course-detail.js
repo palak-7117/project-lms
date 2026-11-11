@@ -8,11 +8,32 @@ const teacherAccess = window.LearnSpaceTeacherAccess;
 const initialTeacherAccess = teacherAccess?.evaluate();
 let teacherAccessRevoked = !initialTeacherAccess?.allowed;
 const teacherUserId = initialTeacherAccess?.userId || null;
+const teacherProfileId = initialTeacherAccess?.teacherId || null;
+let courseOwnershipCheckEnabled = false;
+
+function isCurrentOfferingOwned(currentAccess) {
+    if (!course || !courseId || !currentAccess?.allowed || !teacherUserId || !teacherProfileId) {
+        return false;
+    }
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    if (!offeringData || typeof offeringData.readAndValidateOfferings !== "function") return false;
+    const snapshot = offeringData.readAndValidateOfferings();
+    if (!snapshot.success || snapshot.identity.userId !== teacherUserId ||
+        snapshot.identity.teacherId !== teacherProfileId) return false;
+    const latest = snapshot.records.find((record) => record.id === courseId);
+    return Boolean(latest && offeringData.isOfferingRecord(latest) &&
+        latest.teacherUserId === teacherUserId && latest.teacherId === teacherProfileId &&
+        JSON.stringify(latest) === courseSnapshotValue);
+}
 
 function hasTeacherAccess() {
     if (teacherAccessRevoked || !teacherAccess) return false;
     const current = teacherAccess.evaluate();
-    if (!current.allowed || current.userId !== teacherUserId) {
+    if (!current.allowed || current.userId !== teacherUserId || current.teacherId !== teacherProfileId) {
+        revokeTeacherAccess();
+        return false;
+    }
+    if (courseOwnershipCheckEnabled && !isCurrentOfferingOwned(current)) {
         revokeTeacherAccess();
         return false;
     }
@@ -48,18 +69,26 @@ let deadlineTimer = null;
 
 function loadCourses() {
     if (!hasTeacherAccess()) return [];
-    try {
-        const data = JSON.parse(localStorage.getItem(COURSE_KEY) || "[]");
-        return Array.isArray(data) ? data : [];
-    } catch (error) {
-        console.error("Could not load courses:", error);
-        return [];
-    }
+    const offeringData = window.LearnSpaceTeacherOfferingData;
+    if (!offeringData || typeof offeringData.readAndValidateOfferings !== "function") return null;
+    const snapshot = offeringData.readAndValidateOfferings();
+    return snapshot.success ? snapshot : null;
 }
 
-const course = initialTeacherAccess?.allowed
-    ? loadCourses().find((item) => item.id === courseId)
+const courseSnapshot = initialTeacherAccess?.allowed ? loadCourses() : null;
+const course = courseSnapshot?.success
+    ? courseSnapshot.records.find((item) =>
+        item.id === courseId &&
+        window.LearnSpaceTeacherOfferingData.isOfferingRecord(item) &&
+        item.teacherUserId === teacherUserId &&
+        item.teacherId === teacherProfileId
+    ) || null
     : null;
+const courseOfficialSubject = courseSnapshot?.success && course
+    ? courseSnapshot.curriculumCourses.find((item) => item.id === course.curriculumCourseId)
+    : null;
+const courseSnapshotValue = course ? JSON.stringify(course) : null;
+courseOwnershipCheckEnabled = true;
 
 function contentStorageKey() {
     return CONTENT_PREFIX + courseId;
@@ -194,7 +223,8 @@ function initializeCourse() {
         return;
     }
 
-    courseTitle.textContent = course.name;
+    const displayName = courseOfficialSubject?.name || course.name;
+    courseTitle.textContent = displayName;
     courseInstructor.textContent = course.instructor || "Not specified";
     instructorAvatar.textContent = getInitials(course.instructor || "Teacher");
     courseDescription.textContent =
@@ -202,7 +232,7 @@ function initializeCourse() {
 
     // Student enrollment will be connected to the backend later.
     studentCount.textContent = "0";
-    document.title = `${course.name} | LearnSpace`;
+    document.title = `${displayName} | LearnSpace`;
 }
 
 function formatDateTime(value) {
@@ -1196,6 +1226,11 @@ window.addEventListener("storage", (event) => {
         recheckTeacherAccess();
         if (!hasTeacherAccess()) return;
     }
+    if (event.key === COURSE_KEY || event.key === "learnspaceCurriculumCourses" ||
+        event.key === "learnspaceSemesters") {
+        recheckTeacherAccess();
+        if (!hasTeacherAccess()) return;
+    }
     if (event.key !== contentStorageKey()) return;
 
     syncSubmissionsFromStorage();
@@ -1260,7 +1295,7 @@ function recheckTeacherAccess() {
 
 window.addEventListener("pageshow", recheckTeacherAccess);
 
-if (initialTeacherAccess?.allowed) {
+if (initialTeacherAccess?.allowed && course && hasTeacherAccess()) {
     initializeCourse();
     processAutomaticSubmissions();
     renderTab("materials");
