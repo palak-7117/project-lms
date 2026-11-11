@@ -66,6 +66,9 @@ function revokeTeacherAccess() {
 
 const courseId = new URLSearchParams(window.location.search).get("id");
 let deadlineTimer = null;
+const CONTENT_COLLECTIONS = ["materials", "assignments", "quizzes", "submissions"];
+let contentStorageRawValue = null;
+let contentUnavailableMessage = null;
 
 function loadCourses() {
     if (!hasTeacherAccess()) return [];
@@ -94,88 +97,262 @@ function contentStorageKey() {
     return CONTENT_PREFIX + courseId;
 }
 
-// Read the full stored course record so additional fields are preserved.
-function readStoredContent() {
-    if (!hasTeacherAccess()) return {};
-    try {
-        const data = JSON.parse(
-            localStorage.getItem(contentStorageKey()) || "{}"
-        );
+function createEmptyContent() {
+    return { materials: [], assignments: [], quizzes: [], submissions: [] };
+}
 
-        return data && typeof data === "object" && !Array.isArray(data)
-            ? data
-            : {};
-    } catch (error) {
-        console.error("Could not load course content:", error);
-        return {};
+function isContentRecord(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonemptyContentText(value) {
+    return typeof value === "string" && value.trim() !== "";
+}
+
+function hasValidOptionalText(record, key) {
+    return !Object.prototype.hasOwnProperty.call(record, key) || typeof record[key] === "string";
+}
+
+function isValidContentDate(value) {
+    return typeof value === "string" && value.trim() !== "" && !Number.isNaN(Date.parse(value));
+}
+
+function isConfiguredQuizFormUrl(value) {
+    if (typeof value !== "string" || !value.trim() ||
+        /placeholder|replace_me|your_form/i.test(value)) {
+        return false;
+    }
+
+    try {
+        const parsed = new URL(value.trim());
+        return parsed.protocol === "https:" &&
+            !parsed.username && !parsed.password &&
+            (parsed.hostname === "forms.gle" ||
+             parsed.hostname === "docs.google.com");
+    } catch {
+        return false;
     }
 }
 
-// Keep the raw value with a parsed snapshot so saves can reject stale data.
+function validateContentRecords(collection, records) {
+    if (!Array.isArray(records)) {
+        return { success: false, message: `Saved ${collection} must be a list. Nothing was changed.` };
+    }
+
+    const ids = new Set();
+    const submissionPairs = new Set();
+    for (const record of records) {
+        if (!isContentRecord(record)) {
+            return { success: false, message: `Saved ${collection} contains a malformed record. Nothing was changed.` };
+        }
+        if (["materials", "assignments", "quizzes"].includes(collection) &&
+            !isNonemptyContentText(record.id)) {
+            return { success: false, message: `A saved ${collection} record is missing its ID. Nothing was changed.` };
+        }
+        if (record.id !== undefined && !isNonemptyContentText(record.id)) {
+            return { success: false, message: `Saved ${collection} contains an invalid ID. Nothing was changed.` };
+        }
+        if (typeof record.id === "string") {
+            if (ids.has(record.id)) {
+                return { success: false, message: `Saved ${collection} contains duplicate IDs. Nothing was changed.` };
+            }
+            ids.add(record.id);
+        }
+
+        if (collection === "materials") {
+            if (!isNonemptyContentText(record.title) || !isNonemptyContentText(record.type) ||
+                !["book", "notes", "resource"].includes(record.type) ||
+                !hasValidOptionalText(record, "description") ||
+                !hasValidOptionalText(record, "fileName") ||
+                !hasValidOptionalText(record, "fileData") ||
+                !hasValidOptionalText(record, "url") ||
+                (record.createdAt !== undefined && !isValidContentDate(record.createdAt))) {
+                return { success: false, message: "Saved study materials contain invalid fields. Nothing was changed." };
+            }
+        } else if (collection === "assignments") {
+            if (!isNonemptyContentText(record.title) || !isNonemptyContentText(record.description) ||
+                (record.startAt !== undefined && !isValidContentDate(record.startAt)) ||
+                (record.dueAt !== undefined && !isValidContentDate(record.dueAt)) ||
+                (record.due !== undefined && typeof record.due !== "string") ||
+                (!isValidContentDate(record.dueAt) && !isValidContentDate(record.due)) ||
+                (record.marks !== undefined && (!Number.isFinite(record.marks) || record.marks < 1)) ||
+                (record.published !== undefined && typeof record.published !== "boolean") ||
+                (record.createdAt !== undefined && !isValidContentDate(record.createdAt))) {
+                return { success: false, message: "Saved assignments contain invalid fields. Nothing was changed." };
+            }
+        } else if (collection === "quizzes") {
+            if (!isNonemptyContentText(record.title) || typeof record.description !== "string" ||
+                !isNonemptyContentText(record.type) ||
+                !Number.isInteger(record.questionCount) || record.questionCount < 1 ||
+                !Number.isInteger(record.duration) || record.duration < 1 ||
+                !isValidContentDate(record.startAt) || !isValidContentDate(record.dueAt) ||
+                (record.published !== undefined && typeof record.published !== "boolean") ||
+                (record.formUrl !== undefined && typeof record.formUrl !== "string") ||
+                (record.createdAt !== undefined && !isValidContentDate(record.createdAt))) {
+                return { success: false, message: "Saved quizzes contain invalid fields. Nothing was changed." };
+            }
+        } else if (collection === "submissions") {
+            if (!isNonemptyContentText(record.assignmentId) || !isNonemptyContentText(record.studentId) ||
+                (record.courseId !== undefined &&
+                 (typeof record.courseId !== "string" || record.courseId !== courseId)) ||
+                (record.status !== undefined && typeof record.status !== "string") ||
+                (record.files !== undefined && !Array.isArray(record.files)) ||
+                !hasValidOptionalText(record, "fileData") ||
+                !hasValidOptionalText(record, "fileName") ||
+                !hasValidOptionalText(record, "fileType") ||
+                (record.fileSize !== undefined && !Number.isFinite(record.fileSize))) {
+                return { success: false, message: "Saved submissions contain invalid fields. Nothing was changed." };
+            }
+            if (Array.isArray(record.files)) {
+                for (const file of record.files) {
+                    if (!isContentRecord(file) || !isNonemptyContentText(file.id) ||
+                        !hasValidOptionalText(file, "fileName") ||
+                        !hasValidOptionalText(file, "fileType") ||
+                        !hasValidOptionalText(file, "fileData") ||
+                        (file.fileSize !== undefined && !Number.isFinite(file.fileSize))) {
+                        return { success: false, message: "A saved submission file is malformed. Nothing was changed." };
+                    }
+                }
+            }
+            const pair = `${record.studentId}\u0000${record.assignmentId}`;
+            if (submissionPairs.has(pair)) {
+                return { success: false, message: "Saved submissions contain duplicate student assignments. Nothing was changed." };
+            }
+            submissionPairs.add(pair);
+        }
+    }
+    return { success: true, message: "" };
+}
+
+function validateCourseContent(data) {
+    if (!isContentRecord(data)) {
+        return { success: false, message: "Saved course content is malformed. Nothing was changed." };
+    }
+    const normalized = { ...data };
+    for (const collection of CONTENT_COLLECTIONS) {
+        if (!Object.prototype.hasOwnProperty.call(data, collection)) {
+            normalized[collection] = [];
+            continue;
+        }
+        const validation = validateContentRecords(collection, data[collection]);
+        if (!validation.success) return validation;
+        normalized[collection] = data[collection];
+    }
+    return { success: true, data: normalized, message: "" };
+}
+
+function showContentUnavailable(message) {
+    contentUnavailableMessage = message || "Course content could not be verified. Nothing was changed.";
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
+    if (contentArea) {
+        const note = element("p", "course-message error", contentUnavailableMessage);
+        note.setAttribute("role", "alert");
+        contentArea.replaceChildren(note);
+    }
+}
+
+function clearContentUnavailable() {
+    contentUnavailableMessage = null;
+}
+
+// Validate known collections while preserving unrelated saved metadata.
 function readStoredContentSnapshot() {
-    if (!hasTeacherAccess()) return null;
+    if (!hasTeacherAccess()) return { success: false, message: "Teacher access is unavailable." };
     try {
         const rawValue = localStorage.getItem(contentStorageKey());
-        if (rawValue === null) return { rawValue, data: {} };
-        if (typeof rawValue !== "string") return null;
-
-        const data = JSON.parse(rawValue);
-        if (!data || typeof data !== "object" || Array.isArray(data) ||
-            (Object.prototype.hasOwnProperty.call(data, "submissions") &&
-             !Array.isArray(data.submissions))) {
-            return null;
+        if (rawValue === null) {
+            return { success: true, rawValue, missing: true, data: createEmptyContent() };
         }
-        return { rawValue, data };
+        if (typeof rawValue !== "string") {
+            return { success: false, state: "invalid", message: "Saved course content is unavailable or malformed. Nothing was changed." };
+        }
+        let parsed;
+        try {
+            parsed = JSON.parse(rawValue);
+        } catch (error) {
+            return { success: false, state: "invalid", message: "Saved course content contains malformed JSON. Nothing was changed." };
+        }
+        const validation = validateCourseContent(parsed);
+        if (!validation.success) return { ...validation, state: "invalid" };
+        return { success: true, rawValue, missing: false, data: validation.data };
     } catch (error) {
-        console.error("Could not verify course content before saving:", error);
-        return null;
+        console.error("Could not verify course content:", error);
+        return { success: false, state: "unavailable", message: "Course content could not be read safely. Nothing was changed." };
     }
 }
 
 function loadContent() {
-    if (!hasTeacherAccess()) return { materials: [], assignments: [], quizzes: [], submissions: [] };
-    const data = readStoredContent();
-
-    return {
-        ...data,
-        materials: Array.isArray(data.materials) ? data.materials : [],
-        assignments: Array.isArray(data.assignments) ? data.assignments : [],
-        quizzes: Array.isArray(data.quizzes) ? data.quizzes : [],
-        submissions: Array.isArray(data.submissions) ? data.submissions : []
-    };
+    if (!hasTeacherAccess()) return createEmptyContent();
+    const snapshot = readStoredContentSnapshot();
+    if (!snapshot.success) {
+        showContentUnavailable(snapshot.message);
+        return createEmptyContent();
+    }
+    contentStorageRawValue = snapshot.rawValue;
+    clearContentUnavailable();
+    return snapshot.data;
 }
 
 let content = courseId
     ? loadContent()
-    : { materials: [], assignments: [], quizzes: [], submissions: [] };
+    : createEmptyContent();
+
+function ensureContentReady() {
+    if (!hasTeacherAccess() || contentUnavailableMessage) return false;
+    const snapshot = readStoredContentSnapshot();
+    if (!snapshot.success) {
+        showContentUnavailable(snapshot.message);
+        return false;
+    }
+    if (snapshot.rawValue !== contentStorageRawValue) {
+        showContentUnavailable("Course content changed in another tab. Reload before making more changes.");
+        return false;
+    }
+    return true;
+}
 
 // By default, merge in the latest submissions before saving. This prevents
 // a teacher page left open in another tab from overwriting student submissions.
 function saveContent() {
-    if (!hasTeacherAccess()) return false;
+    if (!hasTeacherAccess() || contentUnavailableMessage) return false;
     try {
         const snapshot = readStoredContentSnapshot();
-        if (!snapshot) return false;
+        if (!snapshot.success) {
+            showContentUnavailable(snapshot.message);
+            return false;
+        }
+        if (snapshot.rawValue !== contentStorageRawValue) {
+            showContentUnavailable("Course content changed in another tab. Reload before making more changes.");
+            return false;
+        }
         const latest = snapshot.data;
-        const latestSubmissions = Array.isArray(latest.submissions)
-            ? latest.submissions
-            : [];
-
-        const submissions = latestSubmissions;
-
         const updatedContent = {
             ...latest,
-            ...content,
-            submissions
+            ...content
         };
+        const validation = validateCourseContent(updatedContent);
+        if (!validation.success) {
+            showContentUnavailable(validation.message);
+            return false;
+        }
 
         if (!hasTeacherAccess() ||
             localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
+            showContentUnavailable("Course content changed before it could be saved. Reload before making more changes.");
             return false;
         }
-        localStorage.setItem(contentStorageKey(), JSON.stringify(updatedContent));
-
-        content.submissions = submissions;
+        const serialized = JSON.stringify(validation.data);
+        localStorage.setItem(contentStorageKey(), serialized);
+        if (localStorage.getItem(contentStorageKey()) !== serialized) {
+            showContentUnavailable("The updated course content could not be verified. Nothing else was changed.");
+            return false;
+        }
+        content = validation.data;
+        contentStorageRawValue = serialized;
+        clearContentUnavailable();
         return true;
     } catch (error) {
         console.error("Could not save course content:", error);
@@ -294,7 +471,14 @@ function normalizeSubmission(submission) {
 function processAutomaticSubmissions() {
     if (!hasTeacherAccess()) return false;
     const snapshot = readStoredContentSnapshot();
-    if (!snapshot) return false;
+    if (!snapshot.success) {
+        showContentUnavailable(snapshot.message);
+        return false;
+    }
+    if (snapshot.rawValue !== contentStorageRawValue) {
+        showContentUnavailable("Course content changed in another tab. Reload before making more changes.");
+        return false;
+    }
 
     const latest = snapshot.data;
     const assignments = Array.isArray(latest.assignments)
@@ -343,16 +527,30 @@ function processAutomaticSubmissions() {
     });
 
     if (changed) {
+        const updatedContent = validateCourseContent({
+            ...latest,
+            submissions
+        });
+        if (!updatedContent.success) {
+            showContentUnavailable(updatedContent.message);
+            return false;
+        }
         try {
             if (!hasTeacherAccess() || localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
+                showContentUnavailable("Course content changed before automatic updates could be saved. Reload before continuing.");
                 return false;
             }
-            localStorage.setItem(contentStorageKey(), JSON.stringify({
-                ...latest,
-                submissions
-            }));
+            const serialized = JSON.stringify(updatedContent.data);
+            localStorage.setItem(contentStorageKey(), serialized);
+            if (localStorage.getItem(contentStorageKey()) !== serialized) {
+                showContentUnavailable("Automatic submission updates could not be verified safely.");
+                return false;
+            }
+            contentStorageRawValue = serialized;
+            content = updatedContent.data;
         } catch (error) {
             console.error("Could not save automatic submission updates:", error);
+            showContentUnavailable("Automatic submission updates could not be saved safely.");
             return false;
         }
     }
@@ -364,10 +562,15 @@ function processAutomaticSubmissions() {
 
 function syncSubmissionsFromStorage() {
     if (!hasTeacherAccess()) return;
-    const latest = readStoredContent();
-    content.submissions = Array.isArray(latest.submissions)
-        ? latest.submissions
-        : [];
+    const snapshot = readStoredContentSnapshot();
+    if (!snapshot.success) {
+        showContentUnavailable(snapshot.message);
+        return false;
+    }
+    content = snapshot.data;
+    contentStorageRawValue = snapshot.rawValue;
+    clearContentUnavailable();
+    return true;
 }
 
 function setMessage(message, isError = false) {
@@ -387,7 +590,7 @@ function makeButton(text, className, callback) {
     const button = element("button", className, text);
     button.type = "button";
     button.addEventListener("click", (...args) => {
-        if (hasTeacherAccess()) callback(...args);
+        if (ensureContentReady()) callback(...args);
     });
     return button;
 }
@@ -510,12 +713,16 @@ function addDeleteButton(card, collection, id, itemName) {
 
             if (!confirmed) return;
 
-            content[collection] = content[collection].filter(
+            if (!ensureContentReady()) return;
+            const originalRecords = content[collection];
+            content[collection] = originalRecords.filter(
                 (item) => item.id !== id
             );
 
-            if (saveContent()) {
+            if (saveContent(collection)) {
                 renderTab(currentTab);
+            } else {
+                content[collection] = originalRecords;
             }
         })
     );
@@ -545,6 +752,21 @@ function decodePdfDataUrl(dataUrl) {
     } catch (error) {
         return null;
     }
+}
+
+function getExternalResourceUrl(value) {
+    if (typeof value !== "string" || !value.trim() || /placeholder|replace_me|your_form/i.test(value)) {
+        return "";
+    }
+    try {
+        const parsed = new URL(value.trim());
+        if ((parsed.protocol === "http:" || parsed.protocol === "https:") && parsed.hostname) {
+            return parsed.href;
+        }
+    } catch (error) {
+        return "";
+    }
+    return "";
 }
 
 function openPdfInNewTab(dataUrl) {
@@ -594,6 +816,7 @@ function openPdfInNewTab(dataUrl) {
 }
 
 function renderMaterials() {
+    if (!ensureContentReady()) return;
     const header = makeSectionHeader(
         "Books & Notes",
         "Add course books, lecture notes, PDFs, and recommended resources.",
@@ -633,16 +856,21 @@ function renderMaterials() {
                 openPdfInNewTab(item.fileData);
             });
             card.appendChild(openLink);
-        } else if (item.url) {
+        } else if (getExternalResourceUrl(item.url)) {
             const openLink = element(
                 "a",
                 "course-resource-link",
                 "Open resource"
             );
-            openLink.href = item.url;
+            openLink.href = getExternalResourceUrl(item.url);
             openLink.target = "_blank";
             openLink.rel = "noopener noreferrer";
             card.appendChild(openLink);
+        } else if (item.url) {
+            const unavailable = element("span", "course-resource-link", "Resource link unavailable");
+            unavailable.setAttribute("aria-disabled", "true");
+            unavailable.title = "The saved resource URL is invalid. Its record was left unchanged.";
+            card.appendChild(unavailable);
         }
 
         addDeleteButton(card, "materials", item.id, item.title);
@@ -709,9 +937,15 @@ function showMaterialForm() {
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
-        if (!hasTeacherAccess()) return;
+        if (!ensureContentReady()) return;
         message.textContent = "";
 
+        const materialTitle = title.value.trim();
+        const resourceUrl = url.value.trim();
+        if (!materialTitle) {
+            message.textContent = "Enter a material title.";
+            return;
+        }
         const selectedFile = file.files[0];
 
         if (selectedFile && selectedFile.type !== "application/pdf") {
@@ -725,9 +959,13 @@ function showMaterialForm() {
             return;
         }
 
-        if (!selectedFile && !url.value.trim()) {
+        if (!selectedFile && !resourceUrl) {
             message.textContent =
                 "Attach a PDF or provide an external resource link.";
+            return;
+        }
+        if (resourceUrl && !getExternalResourceUrl(resourceUrl)) {
+            message.textContent = "Enter a valid HTTP or HTTPS resource link.";
             return;
         }
 
@@ -742,18 +980,20 @@ function showMaterialForm() {
             }
         }
 
+        if (!ensureContentReady()) return;
+
         content.materials.push({
             id: crypto.randomUUID(),
             type: type.value,
-            title: title.value.trim(),
+            title: materialTitle,
             description: description.value.trim(),
             fileName: selectedFile ? selectedFile.name : "",
             fileData,
-            url: url.value.trim(),
+            url: resourceUrl ? getExternalResourceUrl(resourceUrl) : "",
             createdAt: new Date().toISOString()
         });
 
-        if (saveContent()) {
+        if (saveContent("materials")) {
             renderMaterials();
         } else {
             content.materials.pop();
@@ -852,10 +1092,10 @@ function renderAssignmentSubmissions(assignment) {
 }
 
 function renderAssignments() {
-    if (!hasTeacherAccess()) return;
+    if (!ensureContentReady()) return;
 
     // Pick up submissions written by the student page in another tab.
-    syncSubmissionsFromStorage();
+    if (!syncSubmissionsFromStorage()) return;
 
     // Catch review drafts whose deadline passed while this page was closed.
     processAutomaticSubmissions();
@@ -895,10 +1135,18 @@ function renderAssignments() {
             () => {
                 item.published = !item.published;
 
-                if (saveContent()) {
+                if (saveContent("assignments")) {
                     renderAssignments();
+                } else {
+                    item.published = !item.published;
                 }
             }
+        ));
+
+        card.appendChild(makeButton(
+            "Edit",
+            "course-secondary-btn",
+            () => showAssignmentForm(item.id)
         ));
 
         addDeleteButton(card, "assignments", item.id, item.title);
@@ -912,10 +1160,22 @@ function renderAssignments() {
     scheduleDeadlineCheck();
 }
 
-function showAssignmentForm() {
+function showAssignmentForm(assignmentId = null) {
+    if (!ensureContentReady()) return;
+    const editing = assignmentId !== null;
+    const currentAssignment = editing
+        ? content.assignments.find((item) => item.id === assignmentId)
+        : null;
+    if (editing && !currentAssignment) {
+        showContentUnavailable("This assignment is no longer available. Reload before continuing.");
+        return;
+    }
+    const expectedAssignmentSnapshot = currentAssignment ? JSON.stringify(currentAssignment) : null;
     const { form, message } = makeForm(
-        "Create assignment",
-        "Add the instructions, schedule, and marks for your students."
+        editing ? "Edit assignment" : "Create assignment",
+        editing
+            ? "Update the assignment details while preserving its ID, publication state, and submissions."
+            : "Add the instructions, schedule, and marks for your students."
     );
 
     const title = makeInput(
@@ -934,13 +1194,21 @@ function showAssignmentForm() {
     marks.min = "1";
     marks.max = "10000";
     marks.step = "1";
+    marks.disabled = editing;
+    if (currentAssignment) {
+        title.value = currentAssignment.title;
+        description.value = currentAssignment.description;
+        startAt.value = currentAssignment.startAt || "";
+        dueAt.value = currentAssignment.dueAt || currentAssignment.due || "";
+        marks.value = currentAssignment.marks ?? "";
+    }
 
     form.append(
         makeField("Assignment title", title, true),
         makeField("Instructions", description, true),
         makeField("Available from", startAt, true),
         makeField("Due date and time", dueAt, true),
-        makeField("Maximum marks", marks, true)
+        makeField("Maximum marks", marks, !editing)
     );
 
     const actions = element("div", "course-form-actions");
@@ -948,43 +1216,86 @@ function showAssignmentForm() {
         makeButton("Cancel", "course-secondary-btn", renderAssignments)
     );
 
-    const submit = element("button", "course-primary-btn", "Save assignment");
+    const submit = element("button", "course-primary-btn", editing ? "Save changes" : "Save assignment");
     submit.type = "submit";
     actions.appendChild(submit);
     form.appendChild(actions);
 
     form.addEventListener("submit", (event) => {
         event.preventDefault();
-        if (!hasTeacherAccess()) return;
-
-        if (new Date(dueAt.value) < new Date(startAt.value)) {
+        if (!ensureContentReady()) return;
+        const trimmedTitle = title.value.trim();
+        const trimmedDescription = description.value.trim();
+        if (!trimmedTitle) {
+            message.textContent = "Enter an assignment title.";
+            return;
+        }
+        if (!trimmedDescription) {
+            message.textContent = "Enter assignment instructions.";
+            return;
+        }
+        const startTimestamp = new Date(startAt.value).getTime();
+        const dueTimestamp = new Date(dueAt.value).getTime();
+        if (!Number.isFinite(startTimestamp) || !Number.isFinite(dueTimestamp)) {
+            message.textContent = "Enter valid availability and due dates.";
+            return;
+        }
+        if (dueTimestamp < startTimestamp) {
             message.textContent =
                 "The due date cannot be earlier than the availability date.";
             return;
         }
 
-        const assignment = {
-            id: crypto.randomUUID(),
-            title: title.value.trim(),
-            description: description.value.trim(),
-            startAt: startAt.value,
-            dueAt: dueAt.value,
-            marks: Number(marks.value),
-            published: false,
-            createdAt: new Date().toISOString()
-        };
+        let originalAssignments;
+        if (editing) {
+            const snapshot = readStoredContentSnapshot();
+            if (!snapshot.success) {
+                showContentUnavailable(snapshot.message);
+                return;
+            }
+            if (snapshot.rawValue !== contentStorageRawValue) {
+                showContentUnavailable("Course content changed in another tab. Reload before editing this assignment.");
+                return;
+            }
+            const index = snapshot.data.assignments.findIndex((item) => item.id === assignmentId);
+            const latestAssignment = snapshot.data.assignments[index];
+            if (!latestAssignment || JSON.stringify(latestAssignment) !== expectedAssignmentSnapshot) {
+                showContentUnavailable("This assignment changed in another tab. Reload before editing it.");
+                return;
+            }
+            originalAssignments = content.assignments;
+            content.assignments = snapshot.data.assignments.slice();
+            content.assignments[index] = {
+                ...latestAssignment,
+                title: trimmedTitle,
+                description: trimmedDescription,
+                startAt: startAt.value,
+                dueAt: dueAt.value
+            };
+        } else {
+            originalAssignments = content.assignments;
+            content.assignments.push({
+                id: crypto.randomUUID(),
+                title: trimmedTitle,
+                description: trimmedDescription,
+                startAt: startAt.value,
+                dueAt: dueAt.value,
+                marks: Number(marks.value),
+                published: false,
+                createdAt: new Date().toISOString()
+            });
+        }
 
-        content.assignments.push(assignment);
-
-        if (saveContent()) {
+        if (saveContent("assignments")) {
             renderAssignments();
         } else {
-            content.assignments.pop();
+            content.assignments = originalAssignments;
         }
     });
 }
 
 function renderQuizzes() {
+    if (!ensureContentReady()) return;
     const header = makeSectionHeader(
         "Quizzes",
         "Create assessments, set their type and schedule, and manage publication.",
@@ -1019,8 +1330,10 @@ function renderQuizzes() {
             () => {
                 item.published = !item.published;
 
-                if (saveContent()) {
+                if (saveContent("quizzes")) {
                     renderQuizzes();
+                } else {
+                    item.published = !item.published;
                 }
             }
         ));
@@ -1033,6 +1346,7 @@ function renderQuizzes() {
 }
 
 function showQuizForm() {
+    if (!ensureContentReady()) return;
     const { form, message } = makeForm(
         "Create quiz",
         "Choose the assessment format and schedule when students can attempt it."
@@ -1099,9 +1413,28 @@ function showQuizForm() {
 
     form.addEventListener("submit", (event) => {
         event.preventDefault();
-        if (!hasTeacherAccess()) return;
+        if (!ensureContentReady()) return;
 
-        if (new Date(dueAt.value) <= new Date(startAt.value)) {
+        const trimmedTitle = title.value.trim();
+        if (!trimmedTitle) {
+            message.textContent = "Enter a quiz title.";
+            return;
+        }
+
+        const trimmedFormUrl = formUrl.value.trim();
+        if (trimmedFormUrl && !isConfiguredQuizFormUrl(trimmedFormUrl)) {
+            message.textContent =
+                "Use an HTTPS Google Forms link from forms.gle or docs.google.com.";
+            return;
+        }
+
+        const startTimestamp = new Date(startAt.value).getTime();
+        const dueTimestamp = new Date(dueAt.value).getTime();
+        if (!Number.isFinite(startTimestamp) || !Number.isFinite(dueTimestamp)) {
+            message.textContent = "Enter valid opening and closing dates.";
+            return;
+        }
+        if (dueTimestamp <= startTimestamp) {
             message.textContent =
                 "The quiz closing time must be after its opening time.";
             return;
@@ -1109,7 +1442,7 @@ function showQuizForm() {
 
         const quiz = {
             id: crypto.randomUUID(),
-            title: title.value.trim(),
+            title: trimmedTitle,
             description: description.value.trim(),
             type: type.value,
             questionCount: Number(questionCount.value),
@@ -1120,12 +1453,12 @@ function showQuizForm() {
             createdAt: new Date().toISOString(),
             resultVisibility: resultVisibility.value,
             resultsReleased: false,
-            formUrl: formUrl.value.trim()
+            formUrl: trimmedFormUrl
         };
 
         content.quizzes.push(quiz);
 
-        if (saveContent()) {
+        if (saveContent("quizzes")) {
             renderQuizzes();
         } else {
             content.quizzes.pop();
@@ -1155,7 +1488,7 @@ function renderAttendance() {
 let currentTab = "materials";
 
 function renderTab(tabName) {
-    if (!hasTeacherAccess()) return;
+    if (!ensureContentReady()) return;
     currentTab = tabName;
 
     if (!course) return;

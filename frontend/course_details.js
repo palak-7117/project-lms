@@ -1124,6 +1124,27 @@ function canShowQuizResult(quiz) {
          quiz.resultsReleased === true);
 }
 
+function isQuizAvailableNow(quiz, now = Date.now()) {
+    if (!quiz || typeof quiz.startAt !== "string" || !quiz.startAt.trim() ||
+        typeof quiz.dueAt !== "string" || !quiz.dueAt.trim()) {
+        return false;
+    }
+
+    const startAt = Date.parse(quiz.startAt);
+    const dueAt = Date.parse(quiz.dueAt);
+    return Number.isFinite(startAt) && Number.isFinite(dueAt) &&
+        startAt < dueAt && now >= startAt && now <= dueAt;
+}
+
+function getLatestPublishedQuiz(quizId) {
+    if (!ensureStudentAccess() || !courseId || !quizId) return null;
+    const latestContent = readCourseContent(courseId);
+    if (!latestContent || !Array.isArray(latestContent.quizzes)) return null;
+    return latestContent.quizzes.find((item) =>
+        item && item.id === quizId && item.published === true
+    ) || null;
+}
+
 // Render published quizzes; a missing form URL remains clearly unavailable.
 function renderQuizzes(selectedCourse) {
     const list = document.querySelector("#quizList");
@@ -1181,22 +1202,34 @@ function renderQuizzes(selectedCourse) {
         feedback.className = "quiz-feedback";
         feedback.setAttribute("role", "status");
 
-        if (!isConfiguredFormUrl(quiz.formUrl)) {
-            start.addEventListener("click", () => {
-                if (!ensureStudentAccess()) return;
-                feedback.textContent =
-                    "Google Forms link has not been configured.";
-            });
-        } else {
-            start.addEventListener("click", () => {
-                if (!ensureStudentAccess()) return;
-                if (!isConfiguredFormUrl(quiz.formUrl)) {
-                    feedback.textContent = "A valid Google Forms link is not available yet.";
-                    return;
-                }
-                window.open(quiz.formUrl, "_blank", "noopener,noreferrer");
-            });
+        const available = isQuizAvailableNow(quiz);
+        const configuredUrl = isConfiguredFormUrl(quiz.formUrl);
+        start.disabled = !available || !configuredUrl;
+        if (!available) {
+            feedback.textContent = "This quiz is outside its scheduled availability window.";
+        } else if (!configuredUrl) {
+            feedback.textContent = "A valid Google Forms link is not available yet.";
         }
+
+        start.addEventListener("click", () => {
+            if (!ensureStudentAccess()) return;
+
+            // Re-read the published record immediately before launch so stale
+            // rendered dates or URLs cannot bypass current scheduling rules.
+            const latestQuiz = getLatestPublishedQuiz(quiz.id);
+            if (!latestQuiz || !isQuizAvailableNow(latestQuiz)) {
+                start.disabled = true;
+                feedback.textContent = "This quiz is outside its scheduled availability window.";
+                return;
+            }
+            if (!isConfiguredFormUrl(latestQuiz.formUrl)) {
+                start.disabled = true;
+                feedback.textContent = "A valid Google Forms link is not available yet.";
+                return;
+            }
+
+            window.open(latestQuiz.formUrl.trim(), "_blank", "noopener,noreferrer");
+        });
 
         actionWrap.append(start, feedback);
         card.append(copy, actionWrap);
@@ -1205,13 +1238,15 @@ function renderQuizzes(selectedCourse) {
 }
 
 function isConfiguredFormUrl(url) {
-    if (!url || /placeholder|replace_me|your_form/i.test(url)) {
+    if (typeof url !== "string" || !url.trim() ||
+        /placeholder|replace_me|your_form/i.test(url)) {
         return false;
     }
 
     try {
-        const parsed = new URL(url);
+        const parsed = new URL(url.trim());
         return parsed.protocol === "https:" &&
+            !parsed.username && !parsed.password &&
             (parsed.hostname === "forms.gle" ||
              parsed.hostname === "docs.google.com");
     } catch {
