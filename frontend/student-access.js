@@ -10,6 +10,7 @@
     const SESSION_KEY = "learnspaceSession";
     const USERS_KEY = "learnspaceUsers";
     const STUDENTS_KEY = "learnspaceStudents";
+    const TEACHERS_KEY = "learnspaceTeachers";
     const SEMESTERS_KEY = "learnspaceSemesters";
     const CURRICULUM_KEY = "learnspaceCurriculumCourses";
 
@@ -92,6 +93,14 @@
             return { success: false, code: `${kind}_non_array` };
         }
         return { success: true, records: result.value, rawValue: result.rawValue };
+    }
+
+    function readOptionalRecordCollection(storage, key, kind) {
+        const result = readRecordCollection(storage, key, kind);
+        if (!result.success && result.code === `${kind}_missing`) {
+            return { success: true, records: [], rawValue: null };
+        }
+        return result;
     }
 
     function getStorage(options) {
@@ -287,10 +296,11 @@
 
         const usersSnapshot = readRecordCollection(storage, USERS_KEY, "users");
         const studentsSnapshot = readRecordCollection(storage, STUDENTS_KEY, "students");
+        const teachersSnapshot = readOptionalRecordCollection(storage, TEACHERS_KEY, "teachers");
         const curriculumSnapshot = readRecordCollection(storage, CURRICULUM_KEY, "curriculum");
         const semestersSnapshot = readRecordCollection(storage, SEMESTERS_KEY, "semesters");
 
-        for (const snapshot of [usersSnapshot, studentsSnapshot, curriculumSnapshot, semestersSnapshot]) {
+        for (const snapshot of [usersSnapshot, studentsSnapshot, teachersSnapshot, curriculumSnapshot, semestersSnapshot]) {
             if (!snapshot.success) return denied(snapshot.code);
         }
 
@@ -314,6 +324,15 @@
         if (linkedProfiles.length === 0) return denied("student_profile_missing");
         if (linkedProfiles.length !== 1) return denied("students_duplicate_user");
         const profile = linkedProfiles[0];
+
+        // Login checks both role-profile collections. Repeat the cross-role
+        // check here so an existing session cannot keep access after a
+        // Student account is linked to a Teacher profile in another tab.
+        if (teachersSnapshot.records.some((teacherProfile) =>
+            isObjectRecord(teacherProfile) && teacherProfile.userId === user.id
+        )) {
+            return denied("student_profile_cross_role");
+        }
 
         if (profile.admissionStatus !== "admitted") {
             return denied(profile.admissionStatus === "pending" ? "admission_pending" : "admission_rejected");
@@ -348,6 +367,7 @@
             [SESSION_KEY, "session"],
             [USERS_KEY, "users"],
             [STUDENTS_KEY, "students"],
+            [TEACHERS_KEY, "teachers"],
             [CURRICULUM_KEY, "curriculum"],
             [SEMESTERS_KEY, "semesters"]
         ]);
@@ -355,6 +375,7 @@
             [SESSION_KEY, sessionSnapshot.rawValue],
             [USERS_KEY, usersSnapshot.rawValue],
             [STUDENTS_KEY, studentsSnapshot.rawValue],
+            [TEACHERS_KEY, teachersSnapshot.rawValue],
             [CURRICULUM_KEY, curriculumSnapshot.rawValue],
             [SEMESTERS_KEY, semestersSnapshot.rawValue]
         ]) {

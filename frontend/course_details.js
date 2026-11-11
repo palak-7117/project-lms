@@ -12,6 +12,7 @@ const STUDENT_ACCESS_STORAGE_KEYS = new Set([
     "learnspaceSession",
     "learnspaceUsers",
     "learnspaceStudents",
+    "learnspaceTeachers",
     "learnspaceCurriculumCourses",
     "learnspaceSemesters"
 ]);
