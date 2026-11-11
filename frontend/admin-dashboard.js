@@ -1878,7 +1878,7 @@ function renderTeacherDirectoryRows() {
         const row = document.createElement("tr");
         const cell = document.createElement("td");
         cell.className = "student-directory-empty-cell";
-        cell.colSpan = 6;
+        cell.colSpan = 7;
         if (!teacherDirectoryReady) {
             cell.textContent = "Teacher data is unavailable.";
         } else if (teacherDirectoryRecords.length === 0) {
@@ -1904,6 +1904,20 @@ function renderTeacherDirectoryRows() {
             appendDirectoryStatusCell(row, record.accountStatusLabel, record.accountStatusFilter);
             row.append(teacherIdCell, createdCell);
             appendDirectoryStatusCell(row, record.profileStateLabel, record.profileStateFilter);
+            const actionCell = document.createElement("td");
+            if (record.canManage) {
+                const actionButton = document.createElement("button");
+                actionButton.type = "button";
+                actionButton.className = "course-reset-button";
+                actionButton.textContent = record.accountStatus === "active" ? "Deactivate" : "Activate";
+                actionButton.addEventListener("click", () => handleTeacherAccountStatusChange(record));
+                actionCell.append(actionButton);
+            } else {
+                actionCell.textContent = record.accountStatus === "pending"
+                    ? "Pending — no action"
+                    : "Unavailable";
+            }
+            row.append(actionCell);
             tbody.append(row);
         }
     }
@@ -1915,6 +1929,97 @@ function renderTeacherDirectoryRows() {
     } else {
         resultStatus.textContent = `Showing ${filteredRecords.length} of ${teacherDirectoryRecords.length} Teacher directory record${teacherDirectoryRecords.length === 1 ? "" : "s"}.`;
     }
+}
+
+function clearMatchingTeacherSession(userId) {
+    let rawSession;
+    try {
+        rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
+        if (rawSession === null) return { success: true };
+        const session = JSON.parse(rawSession);
+        if (!session || session.role !== "teacher" || session.userId !== userId) return { success: true };
+        if (localStorage.getItem(SESSION_STORAGE_KEY) !== rawSession) {
+            return { success: false, message: "The active session changed during the account update. Refresh and try again." };
+        }
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return { success: true };
+    } catch (error) {
+        return { success: false, message: "The matching Teacher session could not be safely cleared." };
+    }
+}
+
+function handleTeacherAccountStatusChange(record) {
+    if (!teacherDirectoryReady || !record?.canManage) return;
+    const nextStatus = record.accountStatus === "active" ? "disabled" : "active";
+    const currentStatusLabel = record.accountStatus === "active" ? "Active" : "Disabled";
+    const nextStatusLabel = nextStatus === "active" ? "Active" : "Disabled";
+    if (!window.confirm(
+        `Change ${record.displayName} (${record.email}) from ${currentStatusLabel} to ${nextStatusLabel}?${nextStatus === "disabled" ? " This will revoke access on open Teacher pages." : " A fresh valid login will be required before Teacher access resumes."}`
+    )) return;
+
+    const adminData = window.LearnSpaceAdminData;
+    let usersState;
+    let teachersState;
+    let studentsState;
+    try {
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        teachersState = adminData.readArrayFromStorage(TEACHER_STORAGE_KEY);
+        studentsState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+    } catch (error) {
+        setTeacherDirectoryMessage("Teacher account links could not be rechecked. No change was made.", "error");
+        return;
+    }
+    const users = usersState.records || [];
+    const teachers = teachersState.records || [];
+    const students = studentsState.records || [];
+    if (!isReadableArrayState(usersState.state) || !isReadableArrayState(teachersState.state) ||
+        !(studentsState.state === "missing" || isReadableArrayState(studentsState.state)) ||
+        !adminData.validateUsers(users).success ||
+        !adminData.validateProfiles(teachers, "teacher", users).success ||
+        !adminData.validateProfiles(students, "student", users).success) {
+        setTeacherDirectoryMessage("Account or profile data is invalid or unavailable. No change was made.", "error");
+        return;
+    }
+
+    const matchingUsers = users.filter((user) => user.id === record.userId);
+    const matchingTeachers = teachers.filter((profile) => profile.userId === record.userId);
+    const matchingStudents = students.filter((profile) => profile.userId === record.userId);
+    if (matchingUsers.length !== 1 || matchingTeachers.length !== 1 || matchingStudents.length !== 0 ||
+        JSON.stringify(matchingUsers[0]) !== record.userSnapshot ||
+        JSON.stringify(matchingTeachers[0]) !== record.profileSnapshot ||
+        matchingUsers[0].role !== "teacher" || matchingUsers[0].accountStatus !== record.accountStatus ||
+        (record.accountStatus !== "active" && record.accountStatus !== "disabled")) {
+        setTeacherDirectoryMessage("This Teacher record changed or has conflicting links. Refresh the directory before trying again.", "warning");
+        renderTeacherDirectory();
+        return;
+    }
+
+    // Reactivation clears any persisted session first, requiring a fresh login.
+    if (nextStatus === "active") {
+        const sessionResult = clearMatchingTeacherSession(record.userId);
+        if (!sessionResult.success) {
+            setTeacherDirectoryMessage(`${sessionResult.message} The account remains disabled.`, "error");
+            return;
+        }
+    }
+
+    const result = adminData.updateArrayInStorage(USER_STORAGE_KEY, (draftUsers) => {
+        const target = draftUsers.find((user) => user.id === record.userId);
+        if (!target || target.role !== "teacher" || target.accountStatus !== record.accountStatus) {
+            throw new Error("Teacher account changed before the update could be applied.");
+        }
+        target.accountStatus = nextStatus;
+        return draftUsers;
+    });
+    if (!result.success) {
+        setTeacherDirectoryMessage(`${result.message || "Teacher account status could not be updated."} No account data was changed.`, "error");
+        renderTeacherDirectory();
+        return;
+    }
+
+    if (nextStatus === "disabled") clearMatchingTeacherSession(record.userId);
+    setTeacherDirectoryMessage(`${record.displayName} is now ${nextStatus}. Existing Teacher pages will require a new valid login after reactivation.`);
+    renderTeacherDirectory();
 }
 
 function renderTeacherDirectory() {
@@ -2096,7 +2201,12 @@ function renderTeacherDirectory() {
                     : "Unavailable",
                 createdAt,
                 profileStateLabel: profileValid ? "Valid profile" : `Invalid profile — ${profileReason || "Profile data is invalid."}`,
-                profileStateFilter: profileValid ? "valid" : "invalid"
+                profileStateFilter: profileValid ? "valid" : "invalid",
+                userId: user.id,
+                accountStatus: user.accountStatus,
+                canManage: profileValid && (user.accountStatus === "active" || user.accountStatus === "disabled"),
+                userSnapshot: JSON.stringify(user),
+                profileSnapshot: JSON.stringify(profile)
             });
         }
     }

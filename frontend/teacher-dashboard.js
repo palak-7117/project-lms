@@ -1,5 +1,33 @@
 
 const STORAGE_KEY = "learnspaceCourses";
+const teacherAccess = window.LearnSpaceTeacherAccess;
+const initialTeacherAccess = teacherAccess?.evaluate();
+let teacherAccessRevoked = !initialTeacherAccess?.allowed;
+const teacherUserId = initialTeacherAccess?.userId || null;
+
+function hasTeacherAccess() {
+    if (teacherAccessRevoked || !teacherAccess) return false;
+    const current = teacherAccess.evaluate();
+    if (!current.allowed || current.userId !== teacherUserId) {
+        revokeTeacherAccess();
+        return false;
+    }
+    return true;
+}
+
+function revokeTeacherAccess() {
+    teacherAccessRevoked = true;
+    if (courseModalBackdrop) courseModalBackdrop.hidden = true;
+    if (courseGrid) {
+        courseGrid.replaceChildren();
+        const message = document.createElement("p");
+        message.className = "course-access-denied";
+        message.setAttribute("role", "alert");
+        message.textContent = "Teacher access is no longer available. Sign in again after your account is active.";
+        courseGrid.append(message);
+    }
+    if (addCourseBtn) addCourseBtn.disabled = true;
+}
 
 const courseGrid = document.querySelector("#courseGrid");
 const courseCount = document.querySelector("#courseCount");
@@ -29,14 +57,19 @@ function getInitialCoursesFromHTML() {
 
 // Save the complete course list in localStorage.
 function saveCourses(courseList) {
+    if (!hasTeacherAccess()) return false;
+    const serializedCourses = JSON.stringify(courseList);
+    if (!hasTeacherAccess()) return false;
     localStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify(courseList)
+        serializedCourses
     );
+    return true;
 }
 
 // Load saved courses or initialize the original sample courses.
 function loadCourses() {
+    if (!hasTeacherAccess()) return [];
     const savedData = localStorage.getItem(STORAGE_KEY);
 
     if (savedData !== null) {
@@ -84,6 +117,7 @@ function updateCourseLabels() {
 
 // Render all courses from the current course list.
 function renderCourses() {
+    if (!hasTeacherAccess()) return;
     courseGrid.querySelectorAll(".teacher-course-card").forEach((card) => {
         card.remove();
     });
@@ -100,6 +134,7 @@ function renderCourses() {
 
 // Remove a course and save the change.
 function removeCourse(courseId) {
+    if (!hasTeacherAccess()) return;
     const course = courses.find((item) => item.id === courseId);
 
     if (!course) return;
@@ -109,6 +144,7 @@ function removeCourse(courseId) {
     );
 
     if (!confirmed) return;
+    if (!hasTeacherAccess()) return;
 
     courses = courses.filter((item) => item.id !== courseId);
 
@@ -118,6 +154,7 @@ function removeCourse(courseId) {
 
 // Open the Add Course modal.
 function openCourseModal() {
+    if (!hasTeacherAccess()) return;
     addCourseForm.reset();
     courseFormMessage.textContent = "";
 
@@ -142,7 +179,7 @@ function closeCourseForm() {
         courseModalBackdrop.hidden = true;
         courseFormMessage.textContent = "";
         addCourseForm.reset();
-        addCourseBtn.focus();
+        if (hasTeacherAccess()) addCourseBtn.focus();
     }, 450);
 }
 
@@ -224,6 +261,7 @@ function createCourseCard(course, number) {
 
     // Clicking the card opens the matching course workspace.
     card.addEventListener("click", (event) => {
+        if (!hasTeacherAccess()) return;
         if (event.target.closest("button")) return;
 
         window.location.href =
@@ -236,6 +274,7 @@ function createCourseCard(course, number) {
 // Handle creation of a new course.
 addCourseForm.addEventListener("submit", (event) => {
     event.preventDefault();
+    if (!hasTeacherAccess()) return;
 
     const name = newCourseName.value.trim();
     const instructor = newInstructorName.value.trim();
@@ -256,7 +295,7 @@ addCourseForm.addEventListener("submit", (event) => {
 
     courses.push(course);
 
-    saveCourses(courses);
+    if (!hasTeacherAccess() || !saveCourses(courses)) return;
     renderCourses();
     closeCourseForm();
 
@@ -264,4 +303,21 @@ addCourseForm.addEventListener("submit", (event) => {
 });
 
 // Initialize the dashboard.
-renderCourses();
+if (initialTeacherAccess?.allowed) {
+    renderCourses();
+} else {
+    revokeTeacherAccess();
+}
+
+function recheckTeacherAccess() {
+    if (!hasTeacherAccess()) revokeTeacherAccess();
+}
+
+window.addEventListener("focus", recheckTeacherAccess);
+window.addEventListener("pageshow", recheckTeacherAccess);
+window.addEventListener("storage", (event) => {
+    if (teacherAccess?.isRelevantStorageChange(event.key)) recheckTeacherAccess();
+});
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) recheckTeacherAccess();
+});

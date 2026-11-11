@@ -4,6 +4,20 @@
 const COURSE_KEY = "learnspaceCourses";
 const CONTENT_PREFIX = "learnspaceContent_";
 const MAX_PDF_SIZE = 2 * 1024 * 1024; // 2 MB
+const teacherAccess = window.LearnSpaceTeacherAccess;
+const initialTeacherAccess = teacherAccess?.evaluate();
+let teacherAccessRevoked = !initialTeacherAccess?.allowed;
+const teacherUserId = initialTeacherAccess?.userId || null;
+
+function hasTeacherAccess() {
+    if (teacherAccessRevoked || !teacherAccess) return false;
+    const current = teacherAccess.evaluate();
+    if (!current.allowed || current.userId !== teacherUserId) {
+        revokeTeacherAccess();
+        return false;
+    }
+    return true;
+}
 
 const $ = (selector) => document.querySelector(selector);
 
@@ -15,10 +29,25 @@ const studentCount = $("#studentCount");
 const courseTabs = document.querySelectorAll(".course-tab");
 const contentArea = $("#courseTabContent");
 
+function revokeTeacherAccess() {
+    teacherAccessRevoked = true;
+    if (deadlineTimer !== null) window.clearTimeout(deadlineTimer);
+    courseTabs.forEach((tab) => {
+        tab.disabled = true;
+        tab.setAttribute("aria-disabled", "true");
+    });
+    contentArea.replaceChildren();
+    const message = element("p", "course-message error",
+        "Teacher access is no longer available. Sign in again after your account is active.");
+    message.setAttribute("role", "alert");
+    contentArea.append(message);
+}
+
 const courseId = new URLSearchParams(window.location.search).get("id");
 let deadlineTimer = null;
 
 function loadCourses() {
+    if (!hasTeacherAccess()) return [];
     try {
         const data = JSON.parse(localStorage.getItem(COURSE_KEY) || "[]");
         return Array.isArray(data) ? data : [];
@@ -28,7 +57,9 @@ function loadCourses() {
     }
 }
 
-const course = loadCourses().find((item) => item.id === courseId);
+const course = initialTeacherAccess?.allowed
+    ? loadCourses().find((item) => item.id === courseId)
+    : null;
 
 function contentStorageKey() {
     return CONTENT_PREFIX + courseId;
@@ -36,6 +67,7 @@ function contentStorageKey() {
 
 // Read the full stored course record so additional fields are preserved.
 function readStoredContent() {
+    if (!hasTeacherAccess()) return {};
     try {
         const data = JSON.parse(
             localStorage.getItem(contentStorageKey()) || "{}"
@@ -52,6 +84,7 @@ function readStoredContent() {
 
 // Keep the raw value with a parsed snapshot so saves can reject stale data.
 function readStoredContentSnapshot() {
+    if (!hasTeacherAccess()) return null;
     try {
         const rawValue = localStorage.getItem(contentStorageKey());
         if (rawValue === null) return { rawValue, data: {} };
@@ -71,6 +104,7 @@ function readStoredContentSnapshot() {
 }
 
 function loadContent() {
+    if (!hasTeacherAccess()) return { materials: [], assignments: [], quizzes: [], submissions: [] };
     const data = readStoredContent();
 
     return {
@@ -89,6 +123,7 @@ let content = courseId
 // By default, merge in the latest submissions before saving. This prevents
 // a teacher page left open in another tab from overwriting student submissions.
 function saveContent() {
+    if (!hasTeacherAccess()) return false;
     try {
         const snapshot = readStoredContentSnapshot();
         if (!snapshot) return false;
@@ -105,7 +140,8 @@ function saveContent() {
             submissions
         };
 
-        if (localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
+        if (!hasTeacherAccess() ||
+            localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
             return false;
         }
         localStorage.setItem(contentStorageKey(), JSON.stringify(updatedContent));
@@ -226,6 +262,7 @@ function normalizeSubmission(submission) {
 // Promote saved review drafts after their assignment deadline.
 // Drafts with no files are removed and are never shown as submissions.
 function processAutomaticSubmissions() {
+    if (!hasTeacherAccess()) return false;
     const snapshot = readStoredContentSnapshot();
     if (!snapshot) return false;
 
@@ -277,7 +314,7 @@ function processAutomaticSubmissions() {
 
     if (changed) {
         try {
-            if (localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
+            if (!hasTeacherAccess() || localStorage.getItem(contentStorageKey()) !== snapshot.rawValue) {
                 return false;
             }
             localStorage.setItem(contentStorageKey(), JSON.stringify({
@@ -296,6 +333,7 @@ function processAutomaticSubmissions() {
 }
 
 function syncSubmissionsFromStorage() {
+    if (!hasTeacherAccess()) return;
     const latest = readStoredContent();
     content.submissions = Array.isArray(latest.submissions)
         ? latest.submissions
@@ -318,7 +356,9 @@ function setMessage(message, isError = false) {
 function makeButton(text, className, callback) {
     const button = element("button", className, text);
     button.type = "button";
-    button.addEventListener("click", callback);
+    button.addEventListener("click", (...args) => {
+        if (hasTeacherAccess()) callback(...args);
+    });
     return button;
 }
 
@@ -559,6 +599,7 @@ function renderMaterials() {
             openLink.setAttribute("aria-label", `Open ${item.fileName}`);
             openLink.addEventListener("click", (event) => {
                 event.preventDefault();
+                if (!hasTeacherAccess()) return;
                 openPdfInNewTab(item.fileData);
             });
             card.appendChild(openLink);
@@ -638,6 +679,7 @@ function showMaterialForm() {
 
     form.addEventListener("submit", async (event) => {
         event.preventDefault();
+        if (!hasTeacherAccess()) return;
         message.textContent = "";
 
         const selectedFile = file.files[0];
@@ -880,6 +922,7 @@ function showAssignmentForm() {
 
     form.addEventListener("submit", (event) => {
         event.preventDefault();
+        if (!hasTeacherAccess()) return;
 
         if (new Date(dueAt.value) < new Date(startAt.value)) {
             message.textContent =
@@ -1023,6 +1066,7 @@ function showQuizForm() {
 
     form.addEventListener("submit", (event) => {
         event.preventDefault();
+        if (!hasTeacherAccess()) return;
 
         if (new Date(dueAt.value) <= new Date(startAt.value)) {
             message.textContent =
@@ -1078,6 +1122,7 @@ function renderAttendance() {
 let currentTab = "materials";
 
 function renderTab(tabName) {
+    if (!hasTeacherAccess()) return;
     currentTab = tabName;
 
     if (!course) return;
@@ -1102,6 +1147,7 @@ function renderTab(tabName) {
 
 // Recheck deadlines while the teacher workspace remains open.
 function scheduleDeadlineCheck() {
+    if (!hasTeacherAccess()) return;
     if (deadlineTimer) {
         window.clearTimeout(deadlineTimer);
         deadlineTimer = null;
@@ -1142,6 +1188,10 @@ function scheduleDeadlineCheck() {
 
 // A submission from another tab triggers a refresh. Pending files remain hidden.
 window.addEventListener("storage", (event) => {
+    if (teacherAccess?.isRelevantStorageChange(event.key)) {
+        recheckTeacherAccess();
+        if (!hasTeacherAccess()) return;
+    }
     if (event.key !== contentStorageKey()) return;
 
     syncSubmissionsFromStorage();
@@ -1156,6 +1206,8 @@ window.addEventListener("storage", (event) => {
 
 // Catch deadlines when the teacher returns to the workspace after it was idle.
 window.addEventListener("focus", () => {
+    recheckTeacherAccess();
+    if (!hasTeacherAccess()) return;
     syncSubmissionsFromStorage();
     processAutomaticSubmissions();
 
@@ -1168,6 +1220,8 @@ window.addEventListener("focus", () => {
 
 document.addEventListener("visibilitychange", () => {
     if (document.hidden) return;
+    recheckTeacherAccess();
+    if (!hasTeacherAccess()) return;
 
     syncSubmissionsFromStorage();
     processAutomaticSubmissions();
@@ -1181,6 +1235,7 @@ document.addEventListener("visibilitychange", () => {
 
 courseTabs.forEach((tab) => {
     tab.addEventListener("click", () => {
+        if (!hasTeacherAccess()) return;
         if (!course) return;
 
         courseTabs.forEach((item) => {
@@ -1194,7 +1249,17 @@ courseTabs.forEach((tab) => {
 });
 
 // Run the automatic deadline check as soon as the teacher workspace loads.
-initializeCourse();
-processAutomaticSubmissions();
-renderTab("materials");
-scheduleDeadlineCheck();
+function recheckTeacherAccess() {
+    if (!hasTeacherAccess()) revokeTeacherAccess();
+}
+
+window.addEventListener("pageshow", recheckTeacherAccess);
+
+if (initialTeacherAccess?.allowed) {
+    initializeCourse();
+    processAutomaticSubmissions();
+    renderTab("materials");
+    scheduleDeadlineCheck();
+} else {
+    revokeTeacherAccess();
+}
