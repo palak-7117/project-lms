@@ -822,11 +822,14 @@ function renderAssignmentSubmissions(assignment) {
 }
 
 function renderAssignments() {
+    if (!hasTeacherAccess()) return;
+
     // Pick up submissions written by the student page in another tab.
     syncSubmissionsFromStorage();
 
     // Catch review drafts whose deadline passed while this page was closed.
     processAutomaticSubmissions();
+    if (!hasTeacherAccess()) return;
 
     const header = makeSectionHeader(
         "Assignments",
@@ -1177,6 +1180,7 @@ function scheduleDeadlineCheck() {
 
     deadlineTimer = window.setTimeout(() => {
         processAutomaticSubmissions();
+        if (!hasTeacherAccess()) return;
 
         if (currentTab === "assignments") {
             renderAssignments();
@@ -1196,6 +1200,7 @@ window.addEventListener("storage", (event) => {
 
     syncSubmissionsFromStorage();
     processAutomaticSubmissions();
+    if (!hasTeacherAccess()) return;
 
     if (currentTab === "assignments") {
         renderAssignments();
