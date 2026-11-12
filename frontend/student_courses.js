@@ -1,50 +1,144 @@
 "use strict";
 
 const TEACHER_COURSES_KEY = "learnspaceCourses";
+const LEGACY_DEMO_STUDENT_ID = "demo-student";
+const STUDENT_ACCESS_STORAGE_KEYS = new Set([
+    "learnspaceSession",
+    "learnspaceUsers",
+    "learnspaceStudents",
+    "learnspaceTeachers",
+    "learnspaceCurriculumCourses",
+    "learnspaceSemesters",
+    TEACHER_COURSES_KEY
+]);
 // const sampleCourses = Array.isArray(window.courseCatalog)
 //     ? window.courseCatalog
 //     : [];
 
 const courseGrid = document.querySelector("#courseGrid");
 const courseCount = document.querySelector("#courseCount");
+let courses = [];
+let coursesLoaded = false;
+let studentAccessGranted = false;
+let currentAccessDenialCode = "";
+let verifiedUserId = null;
+let verifiedStudentId = null;
+let identityEstablished = false;
 
-function loadTeacherCourses() {
+function evaluateStudentAccess() {
     try {
-        const savedData = localStorage.getItem(TEACHER_COURSES_KEY);
-
-        if (savedData === null) {
-            return [];
+        const evaluator = window.LearnSpaceStudentAccess;
+        if (!evaluator || typeof evaluator.evaluateStudentAccess !== "function") {
+            return { allowed: false, code: "evaluator_unavailable" };
         }
 
-        const parsedCourses = JSON.parse(savedData);
-
-        if (!Array.isArray(parsedCourses)) {
-            return [];
+        const result = evaluator.evaluateStudentAccess();
+        if (!result || typeof result !== "object" || Array.isArray(result)) {
+            return { allowed: false, code: "invalid_evaluation" };
         }
 
-        return parsedCourses
-            .filter((course) => course && course.id)
-            .map((course) => ({
-                id: String(course.id),
-                title: course.name || course.title || "Untitled course",
-                description: course.description || "",
-                icon: course.icon || "✳",
-                coverUrl: course.coverUrl || course.coverImage || course.image || ""
-            }));
+        if (result.allowed === true &&
+            result.code === "access_granted" &&
+            typeof result.userId === "string" && result.userId.trim() !== "" &&
+            typeof result.studentId === "string" &&
+            result.studentId.trim() !== "" &&
+            result.studentId.trim() !== LEGACY_DEMO_STUDENT_ID &&
+            typeof result.semesterId === "string" && result.semesterId.trim() !== "") {
+            return result;
+        }
+
+        if (result.allowed === false) return result;
+        return { allowed: false, code: "invalid_evaluation" };
     } catch (error) {
-        console.error("Could not load teacher courses:", error);
-        return [];
+        return { allowed: false, code: "evaluation_failed" };
     }
 }
 
-const teacherCourses = loadTeacherCourses();
-const courses = teacherCourses;
+function showAccessDenied(result) {
+    studentAccessGranted = false;
+    coursesLoaded = false;
+    courses = [];
 
-// Use teacher courses as the only source when available.
-// Otherwise, show the existing sample catalog as a fallback.
-// const courses = teacherCourses.length > 0
-//     ? teacherCourses
-//     : sampleCourses;
+    if (currentAccessDenialCode === result.code && courseGrid.childElementCount === 1) {
+        return;
+    }
+
+    currentAccessDenialCode = result.code || "access_denied";
+    courseGrid.replaceChildren();
+    courseCount.textContent = "Courses unavailable";
+
+    const message = document.createElement("p");
+    message.className = "courses-access-message";
+    message.setAttribute("role", "status");
+    message.textContent = "Course access is not currently available. Please sign in again or contact an administrator.";
+    courseGrid.append(message);
+}
+
+function showCatalogUnavailable(messageText) {
+    courses = [];
+    coursesLoaded = false;
+    courseGrid.replaceChildren();
+    courseCount.textContent = "Courses unavailable";
+    const message = document.createElement("p");
+    message.className = "courses-access-message";
+    message.setAttribute("role", "status");
+    message.textContent = messageText ||
+        "Course eligibility could not be verified. Please try again or contact an administrator.";
+    courseGrid.append(message);
+}
+
+function refreshStudentAccess({ initialLoad = false, refreshCatalog = false } = {}) {
+    const result = evaluateStudentAccess();
+    if (!result.allowed) {
+        showAccessDenied(result);
+        return false;
+    }
+
+    // A page that began without a verified identity must be reloaded to
+    // establish one. Later lifecycle events must never adopt a new session.
+    if (!identityEstablished) {
+        if (!initialLoad) {
+            showAccessDenied({ code: "identity_not_established" });
+            return false;
+        }
+        verifiedUserId = result.userId;
+        verifiedStudentId = result.studentId;
+        identityEstablished = true;
+    } else if (result.userId !== verifiedUserId ||
+        result.studentId !== verifiedStudentId) {
+        showAccessDenied({ code: "identity_changed" });
+        return false;
+    }
+
+    const wasGranted = studentAccessGranted;
+    currentAccessDenialCode = "";
+    studentAccessGranted = true;
+    if (refreshCatalog || !wasGranted || !coursesLoaded) {
+        const offeringResolver = window.LearnSpaceStudentOfferings;
+        if (!offeringResolver || typeof offeringResolver.readEligibleOfferings !== "function") {
+            showCatalogUnavailable("Course eligibility validation is unavailable.");
+            return false;
+        }
+        const catalog = offeringResolver.readEligibleOfferings();
+        if (!catalog.success) {
+            showCatalogUnavailable(catalog.message);
+            return false;
+        }
+        courses = catalog.offerings.map((offering) => ({
+            id: offering.id,
+            title: offering.name || "Untitled course",
+            description: offering.description || "",
+            icon: offering.icon || "✳",
+            coverUrl: offering.coverUrl || offering.coverImage || offering.image || ""
+        }));
+        coursesLoaded = true;
+        renderCourses();
+    }
+
+    return true;
+}
+
+// The Student-safe resolver returns only offerings eligible for this semester.
 
 function renderCourses() {
     courseGrid.replaceChildren();
@@ -56,7 +150,7 @@ function renderCourses() {
         const emptyMessage = document.createElement("p");
         emptyMessage.className = "courses-empty-state";
         emptyMessage.textContent =
-            "No courses have been added yet. Courses will appear here once a teacher adds them.";
+            "No course offerings are available for your semester yet.";
         courseGrid.append(emptyMessage);
     }
 
@@ -110,6 +204,9 @@ function renderCourses() {
         open.append(openText, arrow);
 
         open.addEventListener("click", () => {
+            if (!refreshStudentAccess({ refreshCatalog: true })) return;
+            if (!courses.some((item) => item.id === course.id)) return;
+
             window.location.href =
                 `course_details.html?course=${encodeURIComponent(course.id)}`;
         });
@@ -122,4 +219,26 @@ function renderCourses() {
         `${courses.length} ${courses.length === 1 ? "course" : "courses"}`;
 }
 
-renderCourses();
+refreshStudentAccess({ initialLoad: true });
+
+function isStudentAccessStorageChange(event) {
+    return event.key === null || STUDENT_ACCESS_STORAGE_KEYS.has(event.key);
+}
+
+function handleStudentAccessLifecycleChange() {
+    refreshStudentAccess({ refreshCatalog: true });
+}
+
+window.addEventListener("storage", (event) => {
+    if (isStudentAccessStorageChange(event)) {
+        handleStudentAccessLifecycleChange();
+    }
+});
+
+window.addEventListener("pageshow", handleStudentAccessLifecycleChange);
+
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) handleStudentAccessLifecycleChange();
+});
+
+window.addEventListener("focus", handleStudentAccessLifecycleChange);

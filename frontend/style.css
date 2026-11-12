@@ -192,10 +192,10 @@ a:focus-visible {
 
 .role-grid {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 24px;
     width: 100%;
-    max-width: 830px;
+    max-width: 1050px;
     margin: 0 auto;
 }
 
@@ -235,6 +235,14 @@ a:focus-visible {
     background-image:
         linear-gradient(rgba(205, 220, 201, 0.48),
                         rgba(205, 220, 201, 0.48)),
+        var(--paper-warm);
+}
+
+.admin-card {
+    background-color: #E6E5D9;
+    background-image:
+        linear-gradient(rgba(214, 218, 199, 0.48),
+                        rgba(214, 218, 199, 0.48)),
         var(--paper-warm);
 }
 
@@ -278,6 +286,10 @@ a:focus-visible {
 
 .teacher-illustration {
     background: rgba(164, 194, 165, 0.30);
+}
+
+.admin-illustration {
+    background: rgba(164, 194, 165, 0.24);
 }
 
 .role-title {
@@ -565,6 +577,19 @@ a:focus-visible {
    13. MOBILE RESPONSIVENESS
 ======================================== */
 
+@media (max-width: 900px) {
+    .role-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        max-width: 700px;
+    }
+
+    .admin-card {
+        grid-column: 1 / -1;
+        justify-self: center;
+        width: calc(50% - 12px);
+    }
+}
+
 @media (max-width: 640px) {
     .page-shell {
         width: min(100% - 32px, var(--page-width));
@@ -595,6 +620,12 @@ a:focus-visible {
         grid-template-columns: 1fr;
         gap: 15px;
         max-width: 420px;
+    }
+
+    .admin-card {
+        grid-column: auto;
+        justify-self: stretch;
+        width: auto;
     }
 
     .role-card {

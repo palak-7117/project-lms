@@ -7,7 +7,16 @@ const CONTENT_STORAGE_PREFIX = "learnspaceContent_";
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
 const MAX_SUBMISSION_SIZE = 2 * 1024 * 1024;
 
-const DEMO_STUDENT_ID = "demo-student";
+const LEGACY_DEMO_STUDENT_ID = "demo-student";
+const STUDENT_ACCESS_STORAGE_KEYS = new Set([
+    "learnspaceSession",
+    "learnspaceUsers",
+    "learnspaceStudents",
+    "learnspaceTeachers",
+    "learnspaceCurriculumCourses",
+    "learnspaceSemesters",
+    COURSE_STORAGE_KEY
+]);
 // const ATTENDANCE_THRESHOLD = 75; // Example only; not an official rule.
 
 const courseId = new URLSearchParams(window.location.search).get("course");
@@ -23,64 +32,346 @@ let activeAssignment = null;
 let activeCourse = null;
 let selectedSubmissionFiles = [];
 let deadlineTimer = null;
+let studentAccessGranted = false;
+let studentAccessEpoch = 0;
+let courseContentInvalid = false;
+let duplicateSubmissionRecordsDetected = false;
+let courseContentStale = false;
+let verifiedStudentId = null;
+const courseContentSnapshots = new WeakMap();
 
-// Read teacher-created courses from localStorage.
-function readTeacherCourses() {
+// Keep the verified identity returned by the evaluator with each operation.
+function getVerifiedStudentAccess() {
     try {
-        const courses = JSON.parse(
-            localStorage.getItem(COURSE_STORAGE_KEY) || "[]"
-        );
-        return Array.isArray(courses) ? courses : [];
+        const evaluator = window.LearnSpaceStudentAccess;
+        if (!evaluator ||
+            typeof evaluator.evaluateStudentAccess !== "function") {
+            return null;
+        }
+
+        const result = evaluator.evaluateStudentAccess();
+        if (
+            result &&
+            typeof result === "object" &&
+            !Array.isArray(result) &&
+            result.allowed === true &&
+            result.code === "access_granted" &&
+            typeof result.userId === "string" &&
+            result.userId.trim() !== "" &&
+            typeof result.studentId === "string" &&
+            result.studentId.trim() !== "" &&
+            result.studentId.trim() !== LEGACY_DEMO_STUDENT_ID &&
+            typeof result.semesterId === "string" &&
+            result.semesterId.trim() !== ""
+        ) {
+            return {
+                userId: result.userId,
+                studentId: result.studentId,
+                semesterId: result.semesterId
+            };
+        }
+        return null;
     } catch (error) {
-        console.error("Could not load teacher courses:", error);
-        return [];
+        return null;
     }
 }
 
-// Read a course record without dropping any additional properties.
-function readCourseContent(selectedCourseId) {
-    try {
-        const data = JSON.parse(
-            localStorage.getItem(
-                `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`
-            ) || "{}"
-        );
-
-        if (!data || typeof data !== "object" || Array.isArray(data)) {
-            return {
-                materials: [],
-                assignments: [],
-                quizzes: [],
-                submissions: []
-            };
+function ensureStudentAccess(expectedStudentId = verifiedStudentId) {
+    const currentAccess = getVerifiedStudentAccess();
+    if (currentAccess &&
+        verifiedStudentId &&
+        expectedStudentId === verifiedStudentId &&
+        currentAccess.studentId === verifiedStudentId) {
+        if (courseId) {
+            const eligibility = readCurrentEligibleOffering();
+            if (!eligibility.success) {
+                clearIneligibleCourse(
+                    eligibility.message ||
+                    "This course is not available for your active semester."
+                );
+                return null;
+            }
         }
+        studentAccessGranted = true;
+        return currentAccess;
+    }
 
-        return {
-            ...data,
-            materials: Array.isArray(data.materials) ? data.materials : [],
-            assignments: Array.isArray(data.assignments) ? data.assignments : [],
-            quizzes: Array.isArray(data.quizzes) ? data.quizzes : [],
-            submissions: Array.isArray(data.submissions) ? data.submissions : []
-        };
+    if (studentAccessGranted) studentAccessEpoch += 1;
+    studentAccessGranted = false;
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
+    if (assignmentDialog.open) {
+        assignmentDialog.close();
+    }
+    activeAssignment = null;
+    selectedSubmissionFiles = [];
+    activeCourse = null;
+    showMessage("Your access to this course could not be verified.");
+    return null;
+}
+
+function readCurrentEligibleOffering() {
+    const resolver = window.LearnSpaceStudentOfferings;
+    if (!resolver || typeof resolver.readEligibleOfferings !== "function") {
+        return { success: false, message: "Course eligibility validation is unavailable." };
+    }
+    try {
+        const snapshot = resolver.readEligibleOfferings();
+        if (!snapshot.success) return snapshot;
+        const offering = snapshot.offerings.find((item) => item.id === courseId);
+        return offering
+            ? { success: true, offering, access: snapshot.access }
+            : { success: false, message: "This course is not available for your active semester." };
+    } catch (error) {
+        return { success: false, message: "Course eligibility could not be verified." };
+    }
+}
+
+function clearIneligibleCourse(message) {
+    studentAccessGranted = false;
+    activeCourse = null;
+    activeAssignment = null;
+    selectedSubmissionFiles = [];
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
+    if (assignmentDialog.open) assignmentDialog.close();
+    showMessage(message);
+}
+
+const COURSE_CONTENT_ARRAY_FIELDS = [
+    "materials",
+    "assignments",
+    "quizzes",
+    "submissions"
+];
+
+function isValidSubmissionFile(file) {
+    return Boolean(file) && typeof file === "object" && !Array.isArray(file) &&
+        typeof file.id === "string" && file.id.trim() !== "" &&
+        (file.fileName === undefined || typeof file.fileName === "string") &&
+        (file.fileType === undefined || typeof file.fileType === "string") &&
+        (file.fileData === undefined || typeof file.fileData === "string") &&
+        (file.fileSize === undefined ||
+            (Number.isFinite(file.fileSize) && file.fileSize >= 0));
+}
+
+function isValidSubmissionRecord(submission) {
+    if (!submission || typeof submission !== "object" || Array.isArray(submission) ||
+        typeof submission.assignmentId !== "string" || !submission.assignmentId.trim() ||
+        typeof submission.studentId !== "string" || !submission.studentId.trim()) {
+        return false;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(submission, "id") &&
+        (typeof submission.id !== "string" || !submission.id.trim())) return false;
+    if (Object.prototype.hasOwnProperty.call(submission, "status") &&
+        typeof submission.status !== "string") return false;
+    if (Object.prototype.hasOwnProperty.call(submission, "courseId") &&
+        (typeof submission.courseId !== "string" || !submission.courseId.trim() ||
+         submission.courseId !== courseId)) return false;
+
+    if (Object.prototype.hasOwnProperty.call(submission, "files") &&
+        (!Array.isArray(submission.files) ||
+         !submission.files.every(isValidSubmissionFile))) return false;
+
+    for (const field of ["fileName", "fileType", "fileData"]) {
+        if (Object.prototype.hasOwnProperty.call(submission, field) &&
+            typeof submission[field] !== "string") return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(submission, "fileId") &&
+        (typeof submission.fileId !== "string" || !submission.fileId.trim())) return false;
+    if (Object.prototype.hasOwnProperty.call(submission, "fileSize") &&
+        (!Number.isFinite(submission.fileSize) || submission.fileSize < 0)) return false;
+
+    const hasLegacyFileMetadata = ["fileData", "fileName", "fileType", "fileSize", "fileId"]
+        .some((field) => Object.prototype.hasOwnProperty.call(submission, field));
+    const hasFiles = Array.isArray(submission.files) && submission.files.length > 0;
+    if (hasLegacyFileMetadata && !hasFiles &&
+        (typeof submission.fileData !== "string" || !submission.fileData.trim())) {
+        return false;
+    }
+
+    return true;
+}
+
+function createEmptyCourseContent() {
+    return {
+        materials: [],
+        assignments: [],
+        quizzes: [],
+        submissions: []
+    };
+}
+
+function isValidCourseContent(data) {
+    if (!data || typeof data !== "object" || Array.isArray(data)) {
+        return false;
+    }
+
+    return COURSE_CONTENT_ARRAY_FIELDS.every((field) => {
+        if (!Object.prototype.hasOwnProperty.call(data, field)) return true;
+        if (!Array.isArray(data[field])) return false;
+        return field === "submissions"
+            ? data[field].every(isValidSubmissionRecord)
+            : data[field].every((item) =>
+                item && typeof item === "object" && !Array.isArray(item)
+            );
+    });
+}
+
+function reportInvalidCourseContent() {
+    courseContentInvalid = true;
+    activeCourse = null;
+    activeAssignment = null;
+    selectedSubmissionFiles = [];
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
+    if (assignmentDialog.open) {
+        assignmentDialog.close();
+    }
+    showMessage(
+        "Course content could not be verified. Please contact your teacher."
+    );
+}
+
+function normalizeCourseContent(data) {
+    return {
+        ...data,
+        materials: Array.isArray(data.materials) ? data.materials : [],
+        assignments: Array.isArray(data.assignments) ? data.assignments : [],
+        quizzes: Array.isArray(data.quizzes) ? data.quizzes : [],
+        submissions: Array.isArray(data.submissions) ? data.submissions : []
+    };
+}
+
+// A missing key represents a new, empty offering-content record. Existing
+// values must parse and have valid collection shapes before they are used.
+function readCourseContent(selectedCourseId) {
+    if (!ensureStudentAccess()) return null;
+    if (selectedCourseId !== courseId) {
+        clearIneligibleCourse("This course is not available for your active semester.");
+        return null;
+    }
+
+    let rawValue;
+    try {
+        rawValue = localStorage.getItem(
+            `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`
+        );
     } catch (error) {
         console.error("Could not load course content:", error);
-        return {
-            materials: [],
-            assignments: [],
-            quizzes: [],
-            submissions: []
-        };
+        reportInvalidCourseContent();
+        return null;
     }
+
+    if (rawValue === null) {
+        courseContentInvalid = false;
+        const emptyContent = createEmptyCourseContent();
+        courseContentSnapshots.set(emptyContent, rawValue);
+        return emptyContent;
+    }
+
+    let data;
+    try {
+        if (typeof rawValue !== "string") {
+            reportInvalidCourseContent();
+            return null;
+        }
+        data = JSON.parse(rawValue);
+    } catch (error) {
+        console.error("Could not load course content:", error);
+        reportInvalidCourseContent();
+        return null;
+    }
+
+    if (!isValidCourseContent(data)) {
+        reportInvalidCourseContent();
+        return null;
+    }
+
+    courseContentInvalid = false;
+    const normalizedContent = normalizeCourseContent(data);
+    courseContentSnapshots.set(normalizedContent, rawValue);
+    return normalizedContent;
 }
 
 // Save the record under its existing course-specific key.
-function writeCourseContent(selectedCourseId, content) {
+function writeCourseContent(
+    selectedCourseId,
+    content,
+    expectedStudentId,
+    expectedRawValue
+) {
+    if (!ensureStudentAccess(expectedStudentId)) return false;
+    if (selectedCourseId !== courseId) {
+        clearIneligibleCourse("This course is not available for your active semester.");
+        return false;
+    }
+    courseContentStale = false;
+
+    if (expectedRawValue === undefined) return false;
+
+    if (!isValidCourseContent(content)) {
+        reportInvalidCourseContent();
+        return false;
+    }
+
+    const contentKey = `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`;
+    let originalValue;
     try {
+        originalValue = localStorage.getItem(contentKey);
+    } catch (error) {
+        console.error("Could not verify course content before saving:", error);
+        reportInvalidCourseContent();
+        return false;
+    }
+
+    if (originalValue !== null) {
+        let existingContent;
+        try {
+            if (typeof originalValue !== "string") {
+                reportInvalidCourseContent();
+                return false;
+            }
+            existingContent = JSON.parse(originalValue);
+        } catch (error) {
+            console.error("Could not verify course content before saving:", error);
+            reportInvalidCourseContent();
+            return false;
+        }
+
+        if (!isValidCourseContent(existingContent)) {
+            reportInvalidCourseContent();
+            return false;
+        }
+    }
+
+    if (originalValue !== expectedRawValue) {
+        courseContentStale = true;
+        return false;
+    }
+
+    try {
+        if (!ensureStudentAccess(expectedStudentId) ||
+            localStorage.getItem(contentKey) !== expectedRawValue) {
+            courseContentStale = true;
+            return false;
+        }
+
+        const serializedContent = JSON.stringify(content);
         localStorage.setItem(
-            `${CONTENT_STORAGE_PREFIX}${selectedCourseId}`,
-            JSON.stringify(content)
+            contentKey,
+            serializedContent
         );
-        return true;
+        const verified = localStorage.getItem(contentKey) === serializedContent;
+        if (!verified) courseContentStale = true;
+        return verified;
     } catch (error) {
         console.error("Could not save course content:", error);
         return false;
@@ -128,8 +419,7 @@ function isDeadlinePassed(assignment) {
     return deadline !== null && Date.now() >= deadline;
 }
 
-// Convert previous single-file records to the current multiple-file shape.
-// Older submissions made with the earlier demo code are treated as submitted.
+// Adapt a record for display without assigning it an inferred owner.
 function normalizeSubmission(submission) {
     let files = Array.isArray(submission.files)
         ? submission.files
@@ -159,9 +449,8 @@ function normalizeSubmission(submission) {
 
     return {
         ...submission,
-        id: submission.id || crypto.randomUUID(),
+        id: submission.id,
         courseId: submission.courseId || courseId,
-        studentId: submission.studentId || DEMO_STUDENT_ID,
         files,
         status,
         uploadedAt: submission.uploadedAt || submission.submittedAt || null,
@@ -173,25 +462,51 @@ function normalizeSubmission(submission) {
 // If a saved review draft is past its due date, submit it automatically.
 // Empty drafts are discarded and never become empty submissions.
 function processAutomaticSubmissions(selectedCourseId, assignments, content) {
+    const access = ensureStudentAccess();
+    if (!access) return null;
+
+    const latestContent = readCourseContent(selectedCourseId);
+    if (!latestContent) return null;
+    content = latestContent;
+
+    const ownedRecords = content.submissions.filter((submission) =>
+        submission.studentId === access.studentId &&
+        isUsableStudentId(submission.studentId)
+    );
+    const ownedPairs = new Set();
+    for (const submission of ownedRecords) {
+        const pairKey = `${submission.studentId}\u0000${submission.assignmentId}`;
+        if (ownedPairs.has(pairKey)) {
+            reportDuplicateSubmissionRecords();
+            return null;
+        }
+        ownedPairs.add(pairKey);
+    }
+
     let changed = false;
     const now = Date.now();
     const assignmentById = new Map(
-        assignments.map((assignment) => [assignment.id, assignment])
+        (Array.isArray(assignments) ? assignments : [])
+            .map((assignment) => [assignment.id, assignment])
     );
 
     const normalized = content.submissions
-        .map((item) => normalizeSubmission(item))
-        .filter((submission) => {
-            const old = content.submissions.find((item) => item.id === submission.id);
+        .map((item) => {
+            if (item.studentId !== access.studentId ||
+                !isUsableStudentId(item.studentId)) {
+                return item;
+            }
 
-            if (JSON.stringify(old) !== JSON.stringify(submission)) {
+            const submission = normalizeSubmission(item);
+
+            if (JSON.stringify(item) !== JSON.stringify(submission)) {
                 changed = true;
             }
 
             if (submission.status === "under-review" &&
                 submission.files.length === 0) {
                 changed = true;
-                return false;
+                return null;
             }
 
             const assignment = assignmentById.get(submission.assignmentId);
@@ -209,19 +524,19 @@ function processAutomaticSubmissions(selectedCourseId, assignments, content) {
                 changed = true;
             }
 
-            return true;
-        });
+            return submission;
+        })
+        .filter(Boolean);
 
     if (changed) {
+        const expectedRawValue = courseContentSnapshots.get(content);
         const saved = writeCourseContent(selectedCourseId, {
             ...content,
             submissions: normalized
-        });
+        }, access.studentId, expectedRawValue);
 
         if (!saved) {
-            console.error(
-                "Automatic submission could not be saved. Browser storage may be full."
-            );
+            return null;
         }
     }
 
@@ -242,14 +557,43 @@ function normalizeMaterialType(type) {
     return types[(type || "").toLowerCase()] || type || "Material";
 }
 
-// Find the saved submission for this demo student and assignment.
+function isUsableStudentId(studentId) {
+    return typeof studentId === "string" &&
+        studentId.trim() !== "" &&
+        studentId.trim() !== LEGACY_DEMO_STUDENT_ID;
+}
+
+function reportDuplicateSubmissionRecords() {
+    duplicateSubmissionRecordsDetected = true;
+    const message = "Submission records could not be verified. Please contact your teacher.";
+    const submissionMessage = document.querySelector("#submissionMessage");
+    if (submissionMessage) submissionMessage.textContent = message;
+}
+
+function getOwnedSubmissionMatches(submissions, assignmentId, studentId) {
+    if (!isUsableStudentId(studentId)) return [];
+    return submissions.filter((item) =>
+        item.assignmentId === assignmentId &&
+        item.studentId === studentId &&
+        (item.courseId === undefined || item.courseId === courseId) &&
+        isUsableStudentId(item.studentId)
+    );
+}
+
+// Find only one exact record owned by the currently verified student.
 function findStudentSubmission(submissions, assignmentId) {
-    return submissions
-        .map(normalizeSubmission)
-        .find((item) =>
-            item.assignmentId === assignmentId &&
-            item.studentId === DEMO_STUDENT_ID
-        ) || null;
+    const access = ensureStudentAccess();
+    if (!access) return null;
+    const matches = getOwnedSubmissionMatches(
+        submissions,
+        assignmentId,
+        access.studentId
+    );
+    if (matches.length > 1) {
+        reportDuplicateSubmissionRecords();
+        return null;
+    }
+    return matches.length === 1 ? normalizeSubmission(matches[0]) : null;
 }
 
 // Convert a teacher assignment to the shape used by student cards.
@@ -257,7 +601,10 @@ function mapTeacherAssignments(assignments, submissions) {
     return assignments
         .filter((item) => item.published === true)
         .map((item) => {
-            const submission = findStudentSubmission(submissions, item.id);
+            const submission = findStudentSubmission(
+                submissions,
+                item.id
+            );
 
             let status = "Available";
             if (submission?.status === "under-review") {
@@ -282,13 +629,19 @@ function mapTeacherAssignments(assignments, submissions) {
 
 // Find the selected course and adapt teacher data for the student interface.
 function getSelectedCourse() {
-    if (!courseId) return null;
-
-    const teacherCourse = readTeacherCourses()
-        .find((item) => String(item.id) === courseId);
+    if (!ensureStudentAccess() || !courseId) return null;
+    const eligibility = readCurrentEligibleOffering();
+    if (!eligibility.success) {
+        clearIneligibleCourse(
+            eligibility.message || "This course is not available for your active semester."
+        );
+        return null;
+    }
+    const teacherCourse = eligibility.offering;
 
     if (teacherCourse) {
         let content = readCourseContent(courseId);
+        if (!content) return null;
 
         // Run the deadline check when this course page loads.
         content = processAutomaticSubmissions(
@@ -296,6 +649,7 @@ function getSelectedCourse() {
             content.assignments,
             content
         );
+        if (!content) return null;
 
         // Preserve matching sample attendance records without changing their data.
         // const matchingSample = sampleCourses.find((item) =>
@@ -381,22 +735,41 @@ function getSelectedCourse() {
     return null;
 }
 
-activeCourse = getSelectedCourse();
+const initialStudentAccess = getVerifiedStudentAccess();
+studentAccessGranted = Boolean(initialStudentAccess);
+verifiedStudentId = initialStudentAccess?.studentId || null;
+if (studentAccessGranted) {
+    activeCourse = getSelectedCourse();
+}
 
 // Save or replace this student's submission without overwriting other course data.
 function saveStudentSubmission(assignment, files, status) {
+    const access = ensureStudentAccess();
+    if (!access || !assignment || !isUsableStudentId(access.studentId)) return null;
+
     const content = readCourseContent(courseId);
-    const existing = findStudentSubmission(
+    if (!content) return null;
+    const existingMatches = getOwnedSubmissionMatches(
         content.submissions,
-        assignment.id
+        assignment.id,
+        access.studentId
     );
+    if (existingMatches.length > 1) {
+        reportDuplicateSubmissionRecords();
+        throw new Error(
+            "Submission records could not be verified. Please contact your teacher."
+        );
+    }
+    const existingRecord = existingMatches[0] || null;
+    const existing = existingRecord ? normalizeSubmission(existingRecord) : null;
 
     const submission = {
-        id: existing?.id || crypto.randomUUID(),
+        ...existingRecord,
+        id: existingRecord?.id || crypto.randomUUID(),
         courseId,
         assignmentId: assignment.id,
         assignmentTitle: assignment.title,
-        studentId: DEMO_STUDENT_ID,
+        studentId: access.studentId,
         files,
         status,
         uploadedAt: existing?.uploadedAt || new Date().toISOString(),
@@ -406,12 +779,10 @@ function saveStudentSubmission(assignment, files, status) {
         submissionType: status === "submitted" ? "manual" : null
     };
 
-    const submissions = content.submissions
-        .map(normalizeSubmission)
-        .filter((item) =>
-            !(item.assignmentId === assignment.id &&
-              item.studentId === DEMO_STUDENT_ID)
-        );
+    const submissions = content.submissions.filter((item) =>
+        !(item.assignmentId === assignment.id &&
+          item.studentId === access.studentId)
+    );
 
     if (files.length > 0) {
         submissions.push(submission);
@@ -420,11 +791,14 @@ function saveStudentSubmission(assignment, files, status) {
     const saved = writeCourseContent(courseId, {
         ...content,
         submissions
-    });
+    }, access.studentId, courseContentSnapshots.get(content));
 
     if (!saved) {
+        if (!studentAccessGranted) return null;
         throw new Error(
-            "Browser storage is full. Remove a file or choose smaller files."
+            courseContentStale
+                ? "Course submissions changed in another tab. Refresh and try again."
+                : "Browser storage is full. Remove a file or choose smaller files."
         );
     }
 
@@ -433,19 +807,32 @@ function saveStudentSubmission(assignment, files, status) {
 
 // Remove a saved review draft when its final file is removed.
 function removeStudentSubmission(assignmentId) {
+    const access = ensureStudentAccess();
+    if (!access || !isUsableStudentId(access.studentId)) return false;
+
     const content = readCourseContent(courseId);
-    const submissions = content.submissions
-        .map(normalizeSubmission)
-        .filter((item) =>
-            !(item.assignmentId === assignmentId &&
-              item.studentId === DEMO_STUDENT_ID &&
-              item.status === "under-review")
-        );
+    if (!content) return false;
+    const matches = getOwnedSubmissionMatches(
+        content.submissions,
+        assignmentId,
+        access.studentId
+    );
+    if (matches.length > 1) {
+        reportDuplicateSubmissionRecords();
+        return false;
+    }
+    if (matches.length !== 1 || matches[0].status !== "under-review") {
+        return false;
+    }
+    const submissions = content.submissions.filter((item) =>
+        !(item.assignmentId === assignmentId &&
+          item.studentId === access.studentId)
+    );
 
     return writeCourseContent(courseId, {
         ...content,
         submissions
-    });
+    }, access.studentId, courseContentSnapshots.get(content));
 }
 
 // Display an error and return link if the selected course is unavailable.
@@ -478,6 +865,16 @@ function renderOverview(selectedCourse) {
     document.querySelector("#courseTitle").textContent = selectedCourse.title;
     document.querySelector("#courseIcon").textContent =
         selectedCourse.icon || "✳";
+
+    let courseDescription = document.querySelector("#courseDescription");
+    if (!courseDescription) {
+        courseDescription = document.createElement("p");
+        courseDescription.id = "courseDescription";
+        courseDescription.className = "course-description";
+        document.querySelector(".instructor-block").before(courseDescription);
+    }
+    courseDescription.textContent = selectedCourse.description || "";
+    courseDescription.hidden = !selectedCourse.description;
 
     const cover = document.querySelector("#courseCover");
     const imageUrl = selectedCourse.image || selectedCourse.coverUrl || "";
@@ -515,7 +912,7 @@ function renderOverview(selectedCourse) {
 // Existing attendance calculations are intentionally unchanged.
 // function renderAttendance(selectedCourse) {
 //     const records = (selectedCourse.attendance || []).filter((record) =>
-//         record.studentId === DEMO_STUDENT_ID &&
+//         record.studentId === verifiedStudentId &&
 //         record.courseId === selectedCourse.id
 //     );
 
@@ -641,6 +1038,8 @@ function isValidPdfDataUrl(value) {
 }
 
 function openPdfInNewTab(dataUrl) {
+    if (!ensureStudentAccess()) return;
+
     const bytes = decodePdfDataUrl(dataUrl);
 
     if (!bytes) {
@@ -752,6 +1151,11 @@ function renderResources(selectedCourse) {
             if (externalUrl) {
                 action.href = externalUrl;
                 action.textContent = "View resource";
+                action.addEventListener("click", (event) => {
+                    event.preventDefault();
+                    if (!ensureStudentAccess()) return;
+                    window.open(externalUrl, "_blank", "noopener,noreferrer");
+                });
             } else {
                 action.removeAttribute("href");
                 action.setAttribute("aria-disabled", "true");
@@ -831,6 +1235,27 @@ function canShowQuizResult(quiz) {
          quiz.resultsReleased === true);
 }
 
+function isQuizAvailableNow(quiz, now = Date.now()) {
+    if (!quiz || typeof quiz.startAt !== "string" || !quiz.startAt.trim() ||
+        typeof quiz.dueAt !== "string" || !quiz.dueAt.trim()) {
+        return false;
+    }
+
+    const startAt = Date.parse(quiz.startAt);
+    const dueAt = Date.parse(quiz.dueAt);
+    return Number.isFinite(startAt) && Number.isFinite(dueAt) &&
+        startAt < dueAt && now >= startAt && now <= dueAt;
+}
+
+function getLatestPublishedQuiz(quizId) {
+    if (!ensureStudentAccess() || !courseId || !quizId) return null;
+    const latestContent = readCourseContent(courseId);
+    if (!latestContent || !Array.isArray(latestContent.quizzes)) return null;
+    return latestContent.quizzes.find((item) =>
+        item && item.id === quizId && item.published === true
+    ) || null;
+}
+
 // Render published quizzes; a missing form URL remains clearly unavailable.
 function renderQuizzes(selectedCourse) {
     const list = document.querySelector("#quizList");
@@ -888,21 +1313,34 @@ function renderQuizzes(selectedCourse) {
         feedback.className = "quiz-feedback";
         feedback.setAttribute("role", "status");
 
-        if (!isConfiguredFormUrl(quiz.formUrl)) {
-            start.addEventListener("click", () => {
-                feedback.textContent =
-                    "Google Forms link has not been configured.";
-            });
-        } else {
-            start.addEventListener("click", () => {
-                 if (!isConfiguredFormUrl(quiz.formUrl)) {
+        const available = isQuizAvailableNow(quiz);
+        const configuredUrl = isConfiguredFormUrl(quiz.formUrl);
+        start.disabled = !available || !configuredUrl;
+        if (!available) {
+            feedback.textContent = "This quiz is outside its scheduled availability window.";
+        } else if (!configuredUrl) {
+            feedback.textContent = "A valid Google Forms link is not available yet.";
+        }
+
+        start.addEventListener("click", () => {
+            if (!ensureStudentAccess()) return;
+
+            // Re-read the published record immediately before launch so stale
+            // rendered dates or URLs cannot bypass current scheduling rules.
+            const latestQuiz = getLatestPublishedQuiz(quiz.id);
+            if (!latestQuiz || !isQuizAvailableNow(latestQuiz)) {
+                start.disabled = true;
+                feedback.textContent = "This quiz is outside its scheduled availability window.";
+                return;
+            }
+            if (!isConfiguredFormUrl(latestQuiz.formUrl)) {
+                start.disabled = true;
                 feedback.textContent = "A valid Google Forms link is not available yet.";
                 return;
             }
-                window.open(quiz.formUrl, "_blank", "noopener,noreferrer");
 
-            });
-        }
+            window.open(latestQuiz.formUrl.trim(), "_blank", "noopener,noreferrer");
+        });
 
         actionWrap.append(start, feedback);
         card.append(copy, actionWrap);
@@ -911,13 +1349,15 @@ function renderQuizzes(selectedCourse) {
 }
 
 function isConfiguredFormUrl(url) {
-    if (!url || /placeholder|replace_me|your_form/i.test(url)) {
+    if (typeof url !== "string" || !url.trim() ||
+        /placeholder|replace_me|your_form/i.test(url)) {
         return false;
     }
 
     try {
-        const parsed = new URL(url);
+        const parsed = new URL(url.trim());
         return parsed.protocol === "https:" &&
+            !parsed.username && !parsed.password &&
             (parsed.hostname === "forms.gle" ||
              parsed.hostname === "docs.google.com");
     } catch {
@@ -1042,8 +1482,12 @@ function renderSubmissionControls() {
 }
 
 // Refresh submission status without discarding files that are still being staged.
-function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
-    if (!activeCourse || !courseId) return;
+function refreshSubmissionState({
+    preserveSelectedFiles = false,
+    expectedStudentId = verifiedStudentId
+} = {}) {
+    const access = ensureStudentAccess(expectedStudentId);
+    if (!access || !activeCourse || !courseId) return false;
 
     // Keep the current in-progress file list before reading localStorage.
     const stagedFiles = preserveSelectedFiles
@@ -1051,6 +1495,7 @@ function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
         : null;
 
     const content = readCourseContent(courseId);
+    if (!content) return false;
     const assignmentList = activeCourse.teacherManaged
         ? content.assignments
         : (activeCourse.assignments || []);
@@ -1060,6 +1505,7 @@ function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
         assignmentList,
         content
     );
+    if (!updatedContent || !ensureStudentAccess(access.studentId)) return false;
 
     activeCourse.assignments = activeCourse.teacherManaged
         ? mapTeacherAssignments(
@@ -1101,10 +1547,14 @@ function refreshSubmissionState({ preserveSelectedFiles = false } = {}) {
 
         renderSubmissionControls();
     }
+
+    return true;
 }
 
 // Remove a selected file. Saved review drafts are updated immediately.
 function removeSubmissionFile(index) {
+    if (!ensureStudentAccess()) return;
+
     if (!activeAssignment || isDeadlinePassed(activeAssignment)) {
         refreshSubmissionState();
         return;
@@ -1127,6 +1577,8 @@ function removeSubmissionFile(index) {
                 )
                 : (removeStudentSubmission(activeAssignment.id), null);
 
+            if (!studentAccessGranted) return;
+
             activeAssignment.submission = saved;
             activeAssignment.status = saved ? "Under review" : "Available";
         } catch (error) {
@@ -1140,9 +1592,19 @@ function removeSubmissionFile(index) {
 
 // Add selected files to the list, validating type and storage limits.
 async function addSelectedFiles(fileList) {
-    if (!activeAssignment) return;
+    const operationAccess = ensureStudentAccess();
+    if (!operationAccess || !activeAssignment) return;
+    const operationStudentId = operationAccess.studentId;
+    const operationAccessEpoch = studentAccessEpoch;
 
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    const operationIsCurrent = () =>
+        operationAccessEpoch === studentAccessEpoch &&
+        Boolean(ensureStudentAccess(operationStudentId));
+
+    if (!refreshSubmissionState({
+        preserveSelectedFiles: true,
+        expectedStudentId: operationStudentId
+    })) return;
 
     if (isDeadlinePassed(activeAssignment) ||
         ["submitted", "auto-submitted"].includes(
@@ -1167,6 +1629,8 @@ async function addSelectedFiles(fileList) {
     const errors = [];
 
     for (const file of files) {
+        if (!operationIsCurrent()) return;
+
         if (!allowedExtensions.test(file.name)) {
             errors.push(`${file.name}: unsupported file type`);
             continue;
@@ -1184,6 +1648,7 @@ async function addSelectedFiles(fileList) {
 
         try {
             const fileData = await readFileAsDataURL(file);
+            if (!operationIsCurrent()) return;
 
             addedFiles.push({
                 id: crypto.randomUUID(),
@@ -1195,11 +1660,13 @@ async function addSelectedFiles(fileList) {
 
             totalSize += file.size;
         } catch (error) {
+            if (!operationIsCurrent()) return;
             console.error("Could not read selected file:", error);
             errors.push(`${file.name}: could not read file`);
         }
     }
 
+    if (!operationIsCurrent()) return;
     selectedSubmissionFiles.push(...addedFiles);
 
     // If the student already saved a review draft, persist additions immediately.
@@ -1211,6 +1678,7 @@ async function addSelectedFiles(fileList) {
                 selectedSubmissionFiles,
                 "under-review"
             );
+            if (!studentAccessGranted) return;
         } catch (error) {
             errors.push(error.message);
         }
@@ -1228,9 +1696,9 @@ async function addSelectedFiles(fileList) {
 
 // Save the current file list as a private review draft.
 function markSubmissionForReview() {
-    if (!activeAssignment) return;
+    if (!ensureStudentAccess() || !activeAssignment) return;
 
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    if (!refreshSubmissionState({ preserveSelectedFiles: true })) return;
 
     if (isDeadlinePassed(activeAssignment)) {
         renderSubmissionControls();
@@ -1246,6 +1714,7 @@ function markSubmissionForReview() {
     if (!selectedSubmissionFiles.length) {
         if (currentStatus === "under-review") {
             const removed = removeStudentSubmission(activeAssignment.id);
+            if (!studentAccessGranted) return;
             if (removed) {
                 activeAssignment.submission = null;
                 activeAssignment.status = "Available";
@@ -1253,7 +1722,9 @@ function markSubmissionForReview() {
                     "The empty review draft was removed.";
             } else {
                 document.querySelector("#submissionMessage").textContent =
-                    "Could not update the saved draft. Browser storage may be full.";
+                    courseContentStale
+                        ? "Course submissions changed in another tab. Refresh and try again."
+                        : "Could not update the saved draft. Browser storage may be full.";
             }
         } else {
             document.querySelector("#submissionMessage").textContent =
@@ -1270,6 +1741,7 @@ function markSubmissionForReview() {
             selectedSubmissionFiles,
             "under-review"
         );
+        if (!studentAccessGranted) return;
         activeAssignment.status = "Under review";
         document.querySelector("#submissionMessage").textContent =
             "Saved for review. The teacher cannot see these files yet.";
@@ -1283,9 +1755,9 @@ function markSubmissionForReview() {
 
 // Submit all current files manually, or respect automatic submission at deadline.
 function markSubmissionComplete() {
-    if (!activeAssignment) return;
+    if (!ensureStudentAccess() || !activeAssignment) return;
 
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    if (!refreshSubmissionState({ preserveSelectedFiles: true })) return;
 
     const status = activeAssignment.submission?.status;
     if (status === "submitted" || status === "auto-submitted") {
@@ -1310,6 +1782,7 @@ function markSubmissionComplete() {
             selectedSubmissionFiles,
             "submitted"
         );
+        if (!studentAccessGranted) return;
         activeAssignment.status = "Submitted";
         document.querySelector("#submissionMessage").textContent =
             "Assignment submitted. Your files are now visible to the teacher.";
@@ -1324,7 +1797,7 @@ function markSubmissionComplete() {
 
 // Open the assignment dialog and restore this student's saved files.
 function openAssignment(assignment) {
-    refreshSubmissionState();
+    if (!ensureStudentAccess() || !refreshSubmissionState()) return;
 
     activeAssignment = activeCourse.assignments.find(
         (item) => item.id === assignment.id
@@ -1375,49 +1848,145 @@ function openAssignment(assignment) {
     document.querySelector("#submissionMessage").textContent = "";
 
     renderSubmissionControls();
+    if (!ensureStudentAccess()) return;
     assignmentDialog.showModal();
 }
 
-// Wire up the file picker and the two submission options.
-document.querySelector("#submissionFile").addEventListener("change", async (event) => {
-    const files = Array.from(event.target.files || []);
-    event.target.value = "";
-    await addSelectedFiles(files);
-});
+if (studentAccessGranted) {
+    // Wire up the file picker and the two submission options only after access passes.
+    document.querySelector("#submissionFile").addEventListener("change", async (event) => {
+        const files = Array.from(event.target.files || []);
+        event.target.value = "";
+        await addSelectedFiles(files);
+    });
 
-document.querySelector("#markForReview").addEventListener("click", () => {
-    markSubmissionForReview();
-});
+    document.querySelector("#markForReview").addEventListener("click", () => {
+        markSubmissionForReview();
+    });
 
-document.querySelector("#demoSubmit").addEventListener("click", () => {
-    markSubmissionComplete();
-});
+    document.querySelector("#demoSubmit").addEventListener("click", () => {
+        markSubmissionComplete();
+    });
 
-document.querySelector("#closeAssignment").addEventListener("click", () => {
-    assignmentDialog.close();
-});
+    document.querySelector("#closeAssignment").addEventListener("click", () => {
+        assignmentDialog.close();
+    });
 
-// Keep the existing course tabs.
-const courseTabs = document.querySelectorAll(".course-tab");
-const coursePanels = document.querySelectorAll("[data-course-panel]");
+    // Keep the existing course tabs.
+    const courseTabs = document.querySelectorAll(".course-tab");
+    const coursePanels = document.querySelectorAll("[data-course-panel]");
 
-courseTabs.forEach((tab) => {
-    tab.addEventListener("click", () => {
-        courseTabs.forEach((item) => {
-            const isSelected = item === tab;
-            item.classList.toggle("is-active", isSelected);
-            item.setAttribute("aria-selected", String(isSelected));
-        });
+    courseTabs.forEach((tab) => {
+        tab.addEventListener("click", () => {
+            if (!ensureStudentAccess()) return;
 
-        coursePanels.forEach((panel) => {
-            panel.hidden = panel.dataset.coursePanel !== tab.dataset.panel;
+            courseTabs.forEach((item) => {
+                const isSelected = item === tab;
+                item.classList.toggle("is-active", isSelected);
+                item.setAttribute("aria-selected", String(isSelected));
+            });
+
+            coursePanels.forEach((panel) => {
+                panel.hidden = panel.dataset.coursePanel !== tab.dataset.panel;
+            });
         });
     });
-});
-
+}
 // Recheck deadlines when the student returns to or refocuses the page.
 function refreshPageSubmissionState() {
-    refreshSubmissionState({ preserveSelectedFiles: true });
+    // An initially denied page has no trusted identity to restore. A reload
+    // is required so initialization can establish the new student's identity.
+    if (!verifiedStudentId) return;
+
+    const wasGranted = studentAccessGranted;
+    const access = ensureStudentAccess(verifiedStudentId);
+    if (!access) return;
+
+    if (!wasGranted || !activeCourse) {
+        activeCourse = getSelectedCourse();
+        if (!activeCourse) {
+            showMessage(courseContentInvalid
+                ? "Course content could not be verified. Please contact your teacher."
+                : duplicateSubmissionRecordsDetected
+                    ? "Submission records could not be verified. Please contact your teacher."
+                    : "That course could not be found.");
+            return;
+        }
+
+        pageMessage.hidden = true;
+        courseContent.hidden = false;
+        renderOverview(activeCourse);
+        renderResources(activeCourse);
+        renderAssignments(activeCourse);
+        renderQuizzes(activeCourse);
+        scheduleDeadlineCheck();
+        return;
+    }
+
+    if (refreshSubmissionState({ preserveSelectedFiles: true })) {
+        scheduleDeadlineCheck();
+    }
+}
+
+// Re-resolve the offering and reload its latest content after a relevant
+// cross-tab change. Existing submission snapshots still guard every write.
+function refreshOpenCoursePage({ preserveSelectedFiles = true } = {}) {
+    if (!verifiedStudentId || !ensureStudentAccess(verifiedStudentId)) return;
+
+    const dialogWasOpen = assignmentDialog.open;
+    const previousAssignmentId = activeAssignment?.id || null;
+    const stagedFiles = preserveSelectedFiles
+        ? selectedSubmissionFiles.map((file) => ({ ...file }))
+        : [];
+
+    const refreshedCourse = getSelectedCourse();
+    if (!refreshedCourse) {
+        activeCourse = null;
+        activeAssignment = null;
+        selectedSubmissionFiles = [];
+        if (deadlineTimer !== null) {
+            window.clearTimeout(deadlineTimer);
+            deadlineTimer = null;
+        }
+        if (assignmentDialog.open) assignmentDialog.close();
+        if (studentAccessGranted) {
+            showMessage(courseContentInvalid
+                ? "Course content could not be verified. Please contact your teacher."
+                : courseContentStale
+                    ? "Course content changed before it could be refreshed. Reload this page to continue."
+                    : "That course could not be found.");
+        }
+        return;
+    }
+
+    activeCourse = refreshedCourse;
+    courseContentStale = false;
+    pageMessage.hidden = true;
+    courseContent.hidden = false;
+
+    if (dialogWasOpen && previousAssignmentId) {
+        activeAssignment = activeCourse.assignments.find(
+            (item) => item.id === previousAssignmentId
+        ) || null;
+        if (!activeAssignment) {
+            assignmentDialog.close();
+            selectedSubmissionFiles = [];
+        } else {
+            const submissionIsFinal =
+                activeAssignment.submission?.status === "submitted" ||
+                activeAssignment.submission?.status === "auto-submitted";
+            selectedSubmissionFiles = preserveSelectedFiles &&
+                !submissionIsFinal && !isDeadlinePassed(activeAssignment)
+                ? stagedFiles
+                : activeAssignment.submission?.files?.map((file) => ({ ...file })) || [];
+        }
+    }
+
+    renderOverview(activeCourse);
+    renderResources(activeCourse);
+    renderAssignments(activeCourse);
+    renderQuizzes(activeCourse);
+    if (assignmentDialog.open && activeAssignment) renderSubmissionControls();
     scheduleDeadlineCheck();
 }
 
@@ -1427,7 +1996,7 @@ function scheduleDeadlineCheck() {
         deadlineTimer = null;
     }
 
-    if (!activeCourse) return;
+    if (!ensureStudentAccess() || !activeCourse) return;
 
     const upcomingDeadlines = (activeCourse.assignments || [])
         .map(getDeadlineTimestamp)
@@ -1440,26 +2009,53 @@ function scheduleDeadlineCheck() {
         Math.max(nextDeadline - Date.now() + 50, 0),
         2147483647
     );
+    const scheduledAccessEpoch = studentAccessEpoch;
 
     deadlineTimer = window.setTimeout(() => {
-        refreshSubmissionState();
-        scheduleDeadlineCheck();
+        deadlineTimer = null;
+        if (scheduledAccessEpoch !== studentAccessEpoch ||
+            !ensureStudentAccess(verifiedStudentId)) return;
+        if (refreshSubmissionState()) {
+            scheduleDeadlineCheck();
+        }
     }, delay);
 }
 
-document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) {
-        refreshPageSubmissionState();
+function isStudentAccessStorageChange(event) {
+    return event.key === null || STUDENT_ACCESS_STORAGE_KEYS.has(event.key);
+}
+
+function handleStudentAccessLifecycleChange() {
+    refreshPageSubmissionState();
+}
+
+window.addEventListener("storage", (event) => {
+    if (event.key === null || event.key === COURSE_STORAGE_KEY ||
+        (courseId && event.key === `${CONTENT_STORAGE_PREFIX}${courseId}`)) {
+        refreshOpenCoursePage({ preserveSelectedFiles: true });
+        return;
+    }
+    if (isStudentAccessStorageChange(event)) {
+        handleStudentAccessLifecycleChange();
     }
 });
 
-window.addEventListener("focus", refreshPageSubmissionState);
-
+window.addEventListener("pageshow", handleStudentAccessLifecycleChange);
+window.addEventListener("focus", handleStudentAccessLifecycleChange);
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) handleStudentAccessLifecycleChange();
+});
 // Load the course, run its initial deadline check, and render its sections.
-if (!courseId) {
+if (!studentAccessGranted) {
+    showMessage("Your access to this course could not be verified.");
+} else if (!courseId) {
     showMessage("No course was selected.");
 } else if (!activeCourse) {
-    showMessage("That course could not be found.");
+    showMessage(courseContentInvalid
+        ? "Course content could not be verified. Please contact your teacher."
+        : duplicateSubmissionRecordsDetected
+            ? "Submission records could not be verified. Please contact your teacher."
+            : "That course could not be found.");
 } else {
     courseContent.hidden = false;
     renderOverview(activeCourse);
