@@ -1105,7 +1105,7 @@ function renderAssignments() {
         "Assignments",
         "Create tasks, set deadlines, and keep course work organized.",
         "＋ Create assignment",
-        showAssignmentForm
+        () => showAssignmentForm(null)
     );
 
     contentArea.replaceChildren(header);

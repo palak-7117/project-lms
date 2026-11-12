@@ -381,25 +381,154 @@
         return result.success ? { ...result, offering: updatedOffering } : result;
     }
 
-    function validateContentForDeletion(rawValue) {
-        if (rawValue === null) return { success: true, data: null };
-        let data;
-        try {
-            data = JSON.parse(rawValue);
-        } catch (error) {
-            return { success: false, message: "The offering content is malformed. Nothing was deleted." };
+    // function validateContentForDeletion(rawValue) {
+    //     if (rawValue === null) return { success: true, data: null };
+    //     let data;
+    //     try {
+    //         data = JSON.parse(rawValue);
+    //     } catch (error) {
+    //         return { success: false, message: "The offering content is malformed. Nothing was deleted." };
+    //     }
+    //     if (!isRecord(data)) {
+    //         return { success: false, message: "The offering content is not a valid record. Nothing was deleted." };
+    //     }
+    //     for (const key of ["materials", "assignments", "quizzes", "submissions"]) {
+    //         if (Object.prototype.hasOwnProperty.call(data, key) &&
+    //             (!Array.isArray(data[key]) || data[key].some((item) => !isRecord(item)))) {
+    //             return { success: false, message: "The offering content contains malformed records. Nothing was deleted." };
+    //         }
+    //     }
+    //     return { success: true, data };
+    // }
+    function validateContentForDeletion(rawValue, offeringId) {
+    if (rawValue === null) return { success: true, data: null };
+
+    let data;
+    try {
+        data = JSON.parse(rawValue);
+    } catch (error) {
+        return { success: false, message: "The offering content is malformed. Nothing was deleted." };
+    }
+
+    if (!isRecord(data)) {
+        return { success: false, message: "The offering content is not a valid record. Nothing was deleted." };
+    }
+
+    const hasValidOptionalText = (record, key) =>
+        !Object.prototype.hasOwnProperty.call(record, key) ||
+        typeof record[key] === "string";
+
+    const isValidDate = (value) =>
+        typeof value === "string" &&
+        value.trim() !== "" &&
+        !Number.isNaN(Date.parse(value));
+
+    for (const collection of ["materials", "assignments", "quizzes", "submissions"]) {
+        if (!Object.prototype.hasOwnProperty.call(data, collection)) continue;
+
+        const records = data[collection];
+        if (!Array.isArray(records)) {
+            return { success: false, message: `Offering ${collection} must be a list. Nothing was deleted.` };
         }
-        if (!isRecord(data)) {
-            return { success: false, message: "The offering content is not a valid record. Nothing was deleted." };
-        }
-        for (const key of ["materials", "assignments", "quizzes", "submissions"]) {
-            if (Object.prototype.hasOwnProperty.call(data, key) &&
-                (!Array.isArray(data[key]) || data[key].some((item) => !isRecord(item)))) {
-                return { success: false, message: "The offering content contains malformed records. Nothing was deleted." };
+
+        const ids = new Set();
+        const submissionPairs = new Set();
+
+        for (const record of records) {
+            if (!isRecord(record)) {
+                return { success: false, message: `Offering ${collection} contains a malformed record. Nothing was deleted.` };
+            }
+
+            if (["materials", "assignments", "quizzes"].includes(collection) &&
+                !isNonemptyString(record.id)) {
+                return { success: false, message: `An offering ${collection} record is missing its ID. Nothing was deleted.` };
+            }
+
+            if (record.id !== undefined && !isNonemptyString(record.id)) {
+                return { success: false, message: `Offering ${collection} contains an invalid ID. Nothing was deleted.` };
+            }
+
+            if (typeof record.id === "string") {
+                if (ids.has(record.id)) {
+                    return { success: false, message: `Offering ${collection} contains duplicate IDs. Nothing was deleted.` };
+                }
+                ids.add(record.id);
+            }
+
+            if (collection === "materials") {
+                if (!isNonemptyString(record.title) ||
+                    !isNonemptyString(record.type) ||
+                    !["book", "notes", "resource"].includes(record.type) ||
+                    !hasValidOptionalText(record, "description") ||
+                    !hasValidOptionalText(record, "fileName") ||
+                    !hasValidOptionalText(record, "fileData") ||
+                    !hasValidOptionalText(record, "url") ||
+                    (record.createdAt !== undefined && !isValidDate(record.createdAt))) {
+                    return { success: false, message: "Offering materials contain invalid fields. Nothing was deleted." };
+                }
+            } else if (collection === "assignments") {
+                if (!isNonemptyString(record.title) ||
+                    !isNonemptyString(record.description) ||
+                    (record.startAt !== undefined && !isValidDate(record.startAt)) ||
+                    (record.dueAt !== undefined && !isValidDate(record.dueAt)) ||
+                    (record.due !== undefined && typeof record.due !== "string") ||
+                    (!isValidDate(record.dueAt) && !isValidDate(record.due)) ||
+                    (record.marks !== undefined && (!Number.isFinite(record.marks) || record.marks < 1)) ||
+                    (record.published !== undefined && typeof record.published !== "boolean") ||
+                    (record.createdAt !== undefined && !isValidDate(record.createdAt))) {
+                    return { success: false, message: "Offering assignments contain invalid fields. Nothing was deleted." };
+                }
+            } else if (collection === "quizzes") {
+                if (!isNonemptyString(record.title) ||
+                    typeof record.description !== "string" ||
+                    !isNonemptyString(record.type) ||
+                    !Number.isInteger(record.questionCount) || record.questionCount < 1 ||
+                    !Number.isInteger(record.duration) || record.duration < 1 ||
+                    !isValidDate(record.startAt) ||
+                    !isValidDate(record.dueAt) ||
+                    (record.published !== undefined && typeof record.published !== "boolean") ||
+                    (record.formUrl !== undefined && typeof record.formUrl !== "string") ||
+                    (record.createdAt !== undefined && !isValidDate(record.createdAt))) {
+                    return { success: false, message: "Offering quizzes contain invalid fields. Nothing was deleted." };
+                }
+            } else if (collection === "submissions") {
+                if (!isNonemptyString(record.assignmentId) ||
+                    !isNonemptyString(record.studentId) ||
+                    (record.courseId !== undefined &&
+                        (typeof record.courseId !== "string" || record.courseId !== offeringId)) ||
+                    (record.status !== undefined && typeof record.status !== "string") ||
+                    (record.files !== undefined && !Array.isArray(record.files)) ||
+                    !hasValidOptionalText(record, "fileData") ||
+                    !hasValidOptionalText(record, "fileName") ||
+                    !hasValidOptionalText(record, "fileType") ||
+                    (record.fileSize !== undefined && !Number.isFinite(record.fileSize))) {
+                    return { success: false, message: "Offering submissions contain invalid fields. Nothing was deleted." };
+                }
+
+                if (Array.isArray(record.files)) {
+                    for (const file of record.files) {
+                        if (!isRecord(file) ||
+                            !isNonemptyString(file.id) ||
+                            !hasValidOptionalText(file, "fileName") ||
+                            !hasValidOptionalText(file, "fileType") ||
+                            !hasValidOptionalText(file, "fileData") ||
+                            (file.fileSize !== undefined && !Number.isFinite(file.fileSize))) {
+                            return { success: false, message: "An offering submission file is malformed. Nothing was deleted." };
+                        }
+                    }
+                }
+
+                const pair = `${record.studentId}\u0000${record.assignmentId}`;
+                if (submissionPairs.has(pair)) {
+                    return { success: false, message: "Offering submissions contain duplicate student assignments. Nothing was deleted." };
+                }
+                submissionPairs.add(pair);
             }
         }
-        return { success: true, data };
     }
+
+    return { success: true, data };
+}
 
     function restoreCourseSnapshot(snapshot, updatedRawValue) {
         try {
@@ -439,7 +568,7 @@
         } catch (error) {
             return { success: false, message: "Offering content could not be read. Nothing was deleted." };
         }
-        const contentValidation = validateContentForDeletion(contentRawValue);
+        const contentValidation = validateContentForDeletion(contentRawValue, offeringId);
         if (!contentValidation.success) return contentValidation;
 
         const updatedRecords = snapshot.records.filter((record) => record.id !== offeringId);
