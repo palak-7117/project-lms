@@ -173,6 +173,13 @@ function isValidCourseContent(data) {
 
 function reportInvalidCourseContent() {
     courseContentInvalid = true;
+    activeCourse = null;
+    activeAssignment = null;
+    selectedSubmissionFiles = [];
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
     if (assignmentDialog.open) {
         assignmentDialog.close();
     }
@@ -805,6 +812,16 @@ function renderOverview(selectedCourse) {
     document.querySelector("#courseTitle").textContent = selectedCourse.title;
     document.querySelector("#courseIcon").textContent =
         selectedCourse.icon || "✳";
+
+    let courseDescription = document.querySelector("#courseDescription");
+    if (!courseDescription) {
+        courseDescription = document.createElement("p");
+        courseDescription.id = "courseDescription";
+        courseDescription.className = "course-description";
+        document.querySelector(".instructor-block").before(courseDescription);
+    }
+    courseDescription.textContent = selectedCourse.description || "";
+    courseDescription.hidden = !selectedCourse.description;
 
     const cover = document.querySelector("#courseCover");
     const imageUrl = selectedCourse.image || selectedCourse.coverUrl || "";
@@ -1858,6 +1875,68 @@ function refreshPageSubmissionState() {
     }
 }
 
+// Re-resolve the offering and reload its latest content after a relevant
+// cross-tab change. Existing submission snapshots still guard every write.
+function refreshOpenCoursePage({ preserveSelectedFiles = true } = {}) {
+    if (!verifiedStudentId || !ensureStudentAccess(verifiedStudentId)) return;
+
+    const dialogWasOpen = assignmentDialog.open;
+    const previousAssignmentId = activeAssignment?.id || null;
+    const stagedFiles = preserveSelectedFiles
+        ? selectedSubmissionFiles.map((file) => ({ ...file }))
+        : [];
+
+    const refreshedCourse = getSelectedCourse();
+    if (!refreshedCourse) {
+        activeCourse = null;
+        activeAssignment = null;
+        selectedSubmissionFiles = [];
+        if (deadlineTimer !== null) {
+            window.clearTimeout(deadlineTimer);
+            deadlineTimer = null;
+        }
+        if (assignmentDialog.open) assignmentDialog.close();
+        if (studentAccessGranted) {
+            showMessage(courseContentInvalid
+                ? "Course content could not be verified. Please contact your teacher."
+                : courseContentStale
+                    ? "Course content changed before it could be refreshed. Reload this page to continue."
+                    : "That course could not be found.");
+        }
+        return;
+    }
+
+    activeCourse = refreshedCourse;
+    courseContentStale = false;
+    pageMessage.hidden = true;
+    courseContent.hidden = false;
+
+    if (dialogWasOpen && previousAssignmentId) {
+        activeAssignment = activeCourse.assignments.find(
+            (item) => item.id === previousAssignmentId
+        ) || null;
+        if (!activeAssignment) {
+            assignmentDialog.close();
+            selectedSubmissionFiles = [];
+        } else {
+            const submissionIsFinal =
+                activeAssignment.submission?.status === "submitted" ||
+                activeAssignment.submission?.status === "auto-submitted";
+            selectedSubmissionFiles = preserveSelectedFiles &&
+                !submissionIsFinal && !isDeadlinePassed(activeAssignment)
+                ? stagedFiles
+                : activeAssignment.submission?.files?.map((file) => ({ ...file })) || [];
+        }
+    }
+
+    renderOverview(activeCourse);
+    renderResources(activeCourse);
+    renderAssignments(activeCourse);
+    renderQuizzes(activeCourse);
+    if (assignmentDialog.open && activeAssignment) renderSubmissionControls();
+    scheduleDeadlineCheck();
+}
+
 function scheduleDeadlineCheck() {
     if (deadlineTimer) {
         window.clearTimeout(deadlineTimer);
@@ -1898,6 +1977,11 @@ function handleStudentAccessLifecycleChange() {
 }
 
 window.addEventListener("storage", (event) => {
+    if (event.key === null || event.key === COURSE_STORAGE_KEY ||
+        (courseId && event.key === `${CONTENT_STORAGE_PREFIX}${courseId}`)) {
+        refreshOpenCoursePage({ preserveSelectedFiles: true });
+        return;
+    }
     if (isStudentAccessStorageChange(event)) {
         handleStudentAccessLifecycleChange();
     }
