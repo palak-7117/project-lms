@@ -8,6 +8,8 @@
     <title>LearnSpace | Teacher Dashboard</title>
 
     <link rel="stylesheet" href="style.css">
+    <script src="teacher-access.js" defer></script>
+    <script src="teacher-offerings.js" defer></script>
     <script src="teacher-dashboard.js" defer></script>
 </head>
 
@@ -37,7 +39,7 @@
             <h1>Good to have you here.</h1>
             <p>
                 Every great lesson starts with a little curiosity.
-                Manage your courses and guide your students.
+                Manage your official subject offerings and guide your students.
             </p>
         </section>
 
@@ -46,14 +48,16 @@
 
             <div class="section-heading">
                 <div>
-                    <p class="eyebrow">YOUR CLASSROOMS</p>
-                    <h2>Courses you teach</h2>
+                    <p class="eyebrow">YOUR OFFERINGS</p>
+                    <h2>Subjects you teach</h2>
                 </div>
 
                 <span class="course-count" id="courseCount">8 courses</span>
             </div>
 
             <div class="course-grid" id="courseGrid">
+
+                <div id="initialCourseSamples" hidden>
 
                 <article class="teacher-course-card">
                     <p class="course-label">COURSE 01</p>
@@ -159,79 +163,79 @@
                     </div>
                 </article>
 
+                </div>
+
                 <!-- Add Course Button -->
                 <button
                     type="button"
                     class="add-course-card"
-                    id="addCourseBtn"
+                    id="addOfferingBtn"
                 >
                     <span class="add-course-symbol">+</span>
-                    <span>Add a course</span>
-                    <small>Create a new classroom</small>
+                    <span>Create an offering</span>
+                    <small>Choose an official subject</small>
                 </button>
 
             </div>
         </section>
+
+        <section class="courses-section official-curriculum-section"
+                 aria-labelledby="officialCurriculumTitle">
+            <div class="section-heading">
+                <div>
+                    <p class="eyebrow">ACADEMIC STRUCTURE</p>
+                    <h2 id="officialCurriculumTitle">Official curriculum</h2>
+                </div>
+            </div>
+            <p class="course-modal-intro">
+                View the official subjects and their semester status maintained by Admin.
+            </p>
+            <p class="data-state" id="teacherCurriculumStatus" role="status"
+               aria-live="polite">Loading official curriculum…</p>
+            <div class="course-content-list" id="teacherCurriculumList"></div>
+        </section>
     </main>
 
-    <!-- Add Course Modal -->
-    <div class="course-modal-backdrop" id="courseModalBackdrop" hidden>
+    <!-- Offering create and edit dialog -->
+    <div class="course-modal-backdrop" id="offeringModalBackdrop" hidden>
 
         <section
             class="course-modal"
             role="dialog"
             aria-modal="true"
-            aria-labelledby="courseModalTitle"
+            aria-labelledby="offeringModalTitle"
         >
             <button
                 type="button"
                 class="course-modal-close"
-                id="closeCourseModal"
+                id="closeOfferingModal"
                 aria-label="Close form"
             >&times;</button>
 
-            <p class="eyebrow">A NEW CLASSROOM</p>
-            <h2 id="courseModalTitle">Create a course.</h2>
+            <p class="eyebrow">OFFICIAL CURRICULUM</p>
+            <h2 id="offeringModalTitle">Create an offering.</h2>
 
             <p class="course-modal-intro">
-                Give your next learning space a name and a purpose.
+                Choose an active official subject. Its semester is maintained by Admin.
             </p>
 
-            <form id="addCourseForm">
+            <form id="offeringForm">
 
-                <label for="newCourseName">Course name</label>
-                <input
-                    type="text"
-                    id="newCourseName"
-                    name="courseName"
-                    placeholder="e.g. Introduction to C++"
-                    maxlength="80"
-                    required
-                >
+                <label for="offeringSubjectId">Official subject</label>
+                <select id="offeringSubjectId" name="curriculumCourseId" required></select>
 
-                <label for="newInstructorName">Instructor name</label>
-                <input
-                    type="text"
-                    id="newInstructorName"
-                    name="instructorName"
-                    placeholder="e.g. Palak Panwar"
-                    maxlength="80"
-                    required
-                >
-
-                <label for="newCourseDescription">Course description</label>
+                <label for="offeringDescription">Description</label>
                 <textarea
-                    id="newCourseDescription"
-                    name="courseDescription"
-                    placeholder="What will your students learn?"
+                    id="offeringDescription"
+                    name="description"
+                    placeholder="Describe this subject offering"
                     rows="3"
                     maxlength="240"
-                    required
                 ></textarea>
 
                 <p
                     class="course-form-message"
-                    id="courseFormMessage"
+                    id="offeringFormMessage"
                     aria-live="polite"
                 ></p>
 
@@ -239,13 +243,13 @@
                     <button
                         type="button"
                         class="cancel-course-btn"
-                        id="cancelCourseBtn"
+                        id="cancelOfferingBtn"
                     >
                         Cancel
                     </button>
 
-                    <button type="submit" class="save-course-btn">
-                        Create course
+                    <button type="submit" class="save-course-btn" id="saveOfferingBtn">
+                        Create offering
                     </button>
                 </div>
 

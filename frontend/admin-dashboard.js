@@ -23,10 +23,152 @@ let selectedCurriculumCourseId = null;
 let selectedCurriculumCourseSnapshot = null;
 let selectedSemesterId = null;
 let selectedSemesterSnapshot = null;
+let adminAccessLocked = false;
+let authorizedAdminSessionRaw = null;
+let authorizedAdminUserId = null;
+
+function evaluateAdminAccess() {
+    let sessionRaw;
+    let usersRaw;
+    try {
+        sessionRaw = localStorage.getItem(SESSION_STORAGE_KEY);
+        usersRaw = localStorage.getItem(USER_STORAGE_KEY);
+    } catch (error) {
+        return { allowed: false, message: "Admin session or account data is unavailable." };
+    }
+    if (sessionRaw === null || usersRaw === null) {
+        return { allowed: false, message: "Sign in with an active Admin account to use this dashboard." };
+    }
+
+    let session;
+    let users;
+    try {
+        session = JSON.parse(sessionRaw);
+        users = JSON.parse(usersRaw);
+    } catch (error) {
+        return { allowed: false, message: "Admin session or account data is malformed." };
+    }
+    if (!session || typeof session !== "object" || Array.isArray(session) ||
+        typeof session.userId !== "string" || !session.userId.trim() ||
+        session.role !== "admin" || session.mode !== "demo" ||
+        !hasValidCreatedAt(session.createdAt)) {
+        return { allowed: false, message: "The saved session is not a valid Admin session." };
+    }
+    if (!Array.isArray(users)) {
+        return { allowed: false, message: "Admin account data is not a valid list." };
+    }
+
+    const usersValidation = validateUsers(users);
+    if (!usersValidation.success) {
+        return { allowed: false, message: "Admin account data could not be validated." };
+    }
+    const matchingUsers = users.filter((user) => user.id === session.userId);
+    if (matchingUsers.length !== 1 || matchingUsers[0].role !== "admin" ||
+        matchingUsers[0].accountStatus !== "active") {
+        return { allowed: false, message: "The session is not linked to exactly one active Admin account." };
+    }
+
+    try {
+        if (localStorage.getItem(SESSION_STORAGE_KEY) !== sessionRaw ||
+            localStorage.getItem(USER_STORAGE_KEY) !== usersRaw) {
+            return { allowed: false, message: "Admin session or account data changed during validation." };
+        }
+    } catch (error) {
+        return { allowed: false, message: "Admin session or account data could not be rechecked." };
+    }
+
+    return {
+        allowed: true,
+        sessionRaw,
+        userId: session.userId,
+        usersRaw
+    };
+}
+
+function renderAdminAccessDenied(message) {
+    const layout = document.querySelector(".admin-layout");
+    if (layout) layout.hidden = true;
+
+    let deniedView = document.querySelector("#adminAccessDenied");
+    if (!deniedView) {
+        deniedView = document.createElement("main");
+        deniedView.id = "adminAccessDenied";
+        deniedView.className = "admin-main data-state is-error";
+        deniedView.setAttribute("role", "alert");
+        const heading = document.createElement("h1");
+        heading.textContent = "Admin access unavailable";
+        const copy = document.createElement("p");
+        const returnLink = document.createElement("a");
+        returnLink.href = "index.html";
+        returnLink.textContent = "Return to sign in";
+        deniedView.append(heading, copy, returnLink);
+        const topbar = document.querySelector(".admin-topbar");
+        if (topbar) topbar.insertAdjacentElement("afterend", deniedView);
+        else document.body.prepend(deniedView);
+    }
+    deniedView.querySelector("p").textContent = message ||
+        "Sign in with an active Admin account, then reload this page.";
+}
+
+function revokeAdminAccess(message) {
+    adminAccessLocked = true;
+    renderAdminAccessDenied(message ||
+        "Admin access was revoked. Sign in again with an active Admin account and reload this page.");
+    return false;
+}
+
+function requireAdminAccess() {
+    if (adminAccessLocked) return false;
+    const access = evaluateAdminAccess();
+    if (!access.allowed) return revokeAdminAccess(access.message);
+    if (authorizedAdminSessionRaw === null) {
+        authorizedAdminSessionRaw = access.sessionRaw;
+        authorizedAdminUserId = access.userId;
+    } else if (access.sessionRaw !== authorizedAdminSessionRaw ||
+        access.userId !== authorizedAdminUserId) {
+        return revokeAdminAccess("The Admin session changed. Sign in again and reload this page.");
+    }
+    return true;
+}
+
+function isActiveAdminInUserSnapshot(rawValue, userId) {
+    if (rawValue === null) return false;
+    try {
+        const users = JSON.parse(rawValue);
+        if (!Array.isArray(users) || !validateUsers(users).success) return false;
+        const matches = users.filter((user) => user.id === userId);
+        return matches.length === 1 && matches[0].role === "admin" &&
+            matches[0].accountStatus === "active";
+    } catch (error) {
+        return false;
+    }
+}
+
+function handleAdminAccessStorageChange(event) {
+    if (adminAccessLocked) return;
+    if (event.key === null) {
+        revokeAdminAccess("Browser storage changed. Sign in again as an active Admin and reload this page.");
+        return;
+    }
+    if (event.key === SESSION_STORAGE_KEY &&
+        event.newValue !== authorizedAdminSessionRaw) {
+        revokeAdminAccess("The Admin session changed. Sign in again and reload this page.");
+        return;
+    }
+    if (event.key === USER_STORAGE_KEY &&
+        !isActiveAdminInUserSnapshot(event.newValue, authorizedAdminUserId)) {
+        revokeAdminAccess("The Admin account is no longer active or valid. Sign in again and reload this page.");
+        return;
+    }
+    requireAdminAccess();
+}
 
 // These helpers support Admin accounts, profiles, semesters, and official
 // curriculum. Teacher offerings and their content keys are not accepted here.
 function readArrayFromStorage(key) {
+    if (!requireAdminAccess()) {
+        return { state: "unavailable", message: "Admin access is unavailable. No data was read." };
+    }
     if (!ADMIN_ARRAY_STORAGE_KEYS.has(key)) {
         return {
             state: "unavailable",
@@ -525,6 +667,9 @@ function preserveExistingFields(proposedRecords, existingRecords, idField) {
 }
 
 function restoreSingleKeyIfStillOurs(key, previousValue, attemptedValue) {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable; recovery was not attempted." };
+    }
     try {
         const currentValue = localStorage.getItem(key);
         if (currentValue === previousValue) return { success: true };
@@ -587,6 +732,9 @@ const runSafeArrayUpdate = (
     validateExisting = validateCollectionForKey,
     validateProposed = validateCollectionForKey
 ) => {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable. No data was changed." };
+    }
     if (!ADMIN_ARRAY_STORAGE_KEYS.has(key)) {
         return { success: false, message: "This storage key is outside the Admin data helper scope." };
     }
@@ -678,6 +826,9 @@ const runSafeArrayUpdate = (
     }
 
     try {
+        if (!requireAdminAccess()) {
+            return { success: false, message: "Admin access is unavailable. No data was changed." };
+        }
         if (localStorage.getItem(key) !== snapshot.rawValue) {
             return { success: false, message: "Saved data changed in another tab. Refresh and try again; no values were overwritten." };
         }
@@ -773,6 +924,9 @@ const repairDuplicateSemesterMembership = (
     expectedSemesterSnapshot,
     expectedDuplicateSemesterIds
 ) => {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable. No data was changed." };
+    }
     if (typeof semesterId !== "string" || !semesterId.trim() ||
         typeof courseId !== "string" || !courseId.trim() ||
         !expectedSemesterSnapshot || typeof expectedSemesterSnapshot !== "object" ||
@@ -853,14 +1007,36 @@ const repairDuplicateSemesterMembership = (
 
 // Reusable by Admin workflows. The allowlist excludes legacy teacher course
 // offerings and all course-content keys.
+function deniedAdminValidationResult() {
+    return { success: false, message: "Admin access is unavailable." };
+}
+
 window.LearnSpaceAdminData = Object.freeze({
-    readArrayFromStorage,
-    validateRecordIds,
-    validateUsers,
-    validateProfiles,
-    validateSemesters,
-    validateCurriculumCourses,
-    updateArrayInStorage
+    readArrayFromStorage(...args) {
+        return requireAdminAccess()
+            ? readArrayFromStorage(...args)
+            : { state: "unavailable", message: "Admin access is unavailable. No data was read." };
+    },
+    validateRecordIds(...args) {
+        return requireAdminAccess() ? validateRecordIds(...args) : deniedAdminValidationResult();
+    },
+    validateUsers(...args) {
+        return requireAdminAccess() ? validateUsers(...args) : deniedAdminValidationResult();
+    },
+    validateProfiles(...args) {
+        return requireAdminAccess() ? validateProfiles(...args) : deniedAdminValidationResult();
+    },
+    validateSemesters(...args) {
+        return requireAdminAccess() ? validateSemesters(...args) : deniedAdminValidationResult();
+    },
+    validateCurriculumCourses(...args) {
+        return requireAdminAccess() ? validateCurriculumCourses(...args) : deniedAdminValidationResult();
+    },
+    updateArrayInStorage(...args) {
+        return requireAdminAccess()
+            ? updateArrayInStorage(...args)
+            : { success: false, message: "Admin access is unavailable. No data was changed." };
+    }
 });
 
 function getProfileCount(profileKey, role, usersState) {
@@ -884,7 +1060,42 @@ function getProfileCount(profileKey, role, usersState) {
 
 let studentDirectoryRecords = [];
 let studentDirectoryReady = false;
+let studentDirectoryAllocatableSemesters = [];
+let studentDirectoryAllocationDataState = "unavailable";
 const studentDirectoryActionsInFlight = new Set();
+
+function readAllocatableSemesters() {
+    const adminData = window.LearnSpaceAdminData;
+    const semesterSnapshot = adminData.readArrayFromStorage(SEMESTER_STORAGE_KEY);
+    const curriculumSnapshot = adminData.readArrayFromStorage(CURRICULUM_COURSE_STORAGE_KEY);
+    if (!isReadableArrayState(semesterSnapshot.state) ||
+        !isReadableArrayState(curriculumSnapshot.state)) {
+        return {
+            success: false,
+            message: semesterSnapshot.message || curriculumSnapshot.message ||
+                "Semester and curriculum data must be configured before allocating students."
+        };
+    }
+
+    const curriculumValidation = adminData.validateCurriculumCourses(curriculumSnapshot.records);
+    if (!curriculumValidation.success) {
+        return { success: false, message: `Curriculum data is invalid. ${curriculumValidation.message}` };
+    }
+    const semesterValidation = adminData.validateSemesters(
+        semesterSnapshot.records,
+        curriculumSnapshot.records
+    );
+    if (!semesterValidation.success) {
+        return { success: false, message: `Semester data is invalid. ${semesterValidation.message}` };
+    }
+
+    return {
+        success: true,
+        semesters: semesterSnapshot.records,
+        semesterRawValue: semesterSnapshot.rawValue,
+        curriculumRawValue: curriculumSnapshot.rawValue
+    };
+}
 
 function validateStudentDirectorySemesters(semesters) {
     const idValidation = window.LearnSpaceAdminData.validateRecordIds(semesters, "id");
@@ -1062,6 +1273,230 @@ function createStudentAuthorizationActions(record, rowActions, displayName) {
     rowActions.append(actions);
 }
 
+function createStudentSemesterAllocationActions(record, rowActions, displayName) {
+    const actions = document.createElement("div");
+    const label = document.createElement("label");
+    const select = document.createElement("select");
+    const prompt = document.createElement("option");
+    const button = document.createElement("button");
+    const activeSemesters = studentDirectoryAllocatableSemesters.filter(
+        (semester) => semester.status === "active"
+    );
+
+    actions.className = "student-authorization-actions";
+    actions.setAttribute("role", "group");
+    actions.setAttribute("aria-label", `Semester allocation for ${displayName}`);
+    select.id = `studentSemesterAllocation${studentDirectoryRecords.indexOf(record) + 1}`;
+    prompt.value = "";
+    prompt.textContent = activeSemesters.length
+        ? "Choose an active semester"
+        : "No active semesters available";
+    select.append(prompt);
+
+    for (const semester of activeSemesters) {
+        const option = document.createElement("option");
+        option.value = semester.id;
+        option.textContent = `${semester.name} (${semester.academicYear})`;
+        select.append(option);
+    }
+
+    if (record.profile.semesterId && activeSemesters.some(
+        (semester) => semester.id === record.profile.semesterId
+    )) {
+        select.value = record.profile.semesterId;
+    }
+
+    label.htmlFor = select.id;
+    label.textContent = `Allocate semester for ${displayName}`;
+    button.type = "button";
+    button.className = "student-admission-button is-approve";
+    button.textContent = record.profile.semesterId === null
+        ? "Allocate"
+        : "Change allocation";
+    button.disabled = studentDirectoryAllocationDataState !== "valid" ||
+        activeSemesters.length === 0 || !select.value ||
+        select.value === record.profile.semesterId;
+    button.addEventListener("click", () => {
+        handleStudentSemesterAllocation(record, select.value, displayName, rowActions);
+    });
+    select.disabled = studentDirectoryAllocationDataState !== "valid" ||
+        activeSemesters.length === 0;
+    select.addEventListener("change", () => {
+        button.disabled = studentDirectoryAllocationDataState !== "valid" ||
+            !select.value || select.value === record.profile.semesterId;
+    });
+
+    if (studentDirectoryAllocationDataState !== "valid") {
+        const note = document.createElement("span");
+        note.className = "data-state is-warning";
+        note.textContent = "Valid semester and curriculum data are required.";
+        actions.append(label, select, button, note);
+    } else {
+        actions.append(label, select, button);
+    }
+    rowActions.append(actions);
+}
+
+function handleStudentSemesterAllocation(record, targetSemesterId, studentName, actionsElement) {
+    if (!requireAdminAccess()) return;
+    const studentId = record.profile.studentId;
+    if (!studentId || !targetSemesterId || studentDirectoryActionsInFlight.has(studentId)) return;
+
+    studentDirectoryActionsInFlight.add(studentId);
+    actionsElement.querySelectorAll("button, select").forEach((control) => {
+        control.disabled = true;
+    });
+
+    const showAllocationFeedback = (message, state = "error") => {
+        try {
+            renderStudentDirectory();
+        } catch (error) {
+            // Keep the actionable message visible if a refresh fails.
+        }
+        setStudentDirectoryMessage(message, state);
+        studentDirectoryActionsInFlight.delete(studentId);
+    };
+
+    const expectedProfileSnapshot = JSON.stringify(record.profile);
+
+    let usersState;
+    let profilesState;
+    let semesterData;
+    try {
+        const adminData = window.LearnSpaceAdminData;
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        profilesState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+        semesterData = readAllocatableSemesters();
+    } catch (error) {
+        showAllocationFeedback("Student, semester, or curriculum data could not be read safely. No changes were made.");
+        return;
+    }
+
+    if (!isReadableArrayState(usersState.state) || !isReadableArrayState(profilesState.state) ||
+        !semesterData.success) {
+        showAllocationFeedback(
+            semesterData.message || profilesState.message || usersState.message ||
+                "Student data is unavailable. No changes were made."
+        );
+        return;
+    }
+
+    const adminData = window.LearnSpaceAdminData;
+    const usersValidation = adminData.validateUsers(usersState.records);
+    const profilesValidation = usersValidation.success
+        ? adminData.validateProfiles(profilesState.records, "student", usersState.records)
+        : usersValidation;
+    if (!usersValidation.success || !profilesValidation.success) {
+        showAllocationFeedback(
+            `Student data is invalid and cannot be updated safely. ${profilesValidation.message || usersValidation.message} No changes were made.`
+        );
+        return;
+    }
+
+    const matchingProfiles = profilesState.records.filter(
+        (profile) => profile.studentId === studentId
+    );
+    if (matchingProfiles.length !== 1 ||
+        JSON.stringify(matchingProfiles[0]) !== expectedProfileSnapshot) {
+        showAllocationFeedback("This Student profile changed or no longer exists. The directory was refreshed.");
+        return;
+    }
+
+    const targetMatches = semesterData.semesters.filter(
+        (semester) => semester.id === targetSemesterId
+    );
+    if (targetMatches.length !== 1 || targetMatches[0].status !== "active") {
+        showAllocationFeedback("The selected semester is missing, invalid, or inactive. No changes were made.");
+        return;
+    }
+    const targetSemester = targetMatches[0];
+    const targetLabel = `${targetSemester.name} (${targetSemester.academicYear})`;
+    const existingSemesterMatches = record.profile.semesterId === null
+        ? []
+        : semesterData.semesters.filter((semester) => semester.id === record.profile.semesterId);
+    const existingSemester = existingSemesterMatches.length === 1
+        ? existingSemesterMatches[0]
+        : null;
+    const currentSemester = existingSemester
+        ? `${existingSemester.name} (${existingSemester.academicYear}${existingSemester.status === "inactive" ? ", inactive" : ""})`
+        : record.profile.semesterId === null
+            ? "Not allocated"
+            : `Unknown semester (${record.profile.semesterId})`;
+    if (record.profile.semesterId === targetSemester.id) {
+        showAllocationFeedback("The Student is already allocated to this semester.", "");
+        return;
+    }
+
+    if (!window.confirm(
+        `Change the semester allocation for ${studentName} from ${currentSemester} to ${targetLabel}? This replaces the current semesterId; historical semester allocations are not tracked. Admission, authorization, and account status will not change.`
+    )) {
+        renderStudentDirectory();
+        studentDirectoryActionsInFlight.delete(studentId);
+        return;
+    }
+
+    const expectedSemesterRawValue = semesterData.semesterRawValue;
+    const expectedCurriculumRawValue = semesterData.curriculumRawValue;
+    // Re-read after confirmation so a stale or deactivated semester cannot be
+    // assigned from an old directory snapshot.
+    semesterData = readAllocatableSemesters();
+    const latestTarget = semesterData.success
+        ? semesterData.semesters.filter((semester) => semester.id === targetSemesterId)
+        : [];
+    let semesterSnapshotsMatch = false;
+    try {
+        semesterSnapshotsMatch = semesterData.success &&
+            semesterData.semesterRawValue === expectedSemesterRawValue &&
+            semesterData.curriculumRawValue === expectedCurriculumRawValue &&
+            localStorage.getItem(SEMESTER_STORAGE_KEY) === semesterData.semesterRawValue &&
+            localStorage.getItem(CURRICULUM_COURSE_STORAGE_KEY) === semesterData.curriculumRawValue;
+    } catch (error) {
+        semesterSnapshotsMatch = false;
+    }
+    if (!semesterSnapshotsMatch || latestTarget.length !== 1 || latestTarget[0].status !== "active") {
+        showAllocationFeedback("Semester or curriculum data changed or became invalid. Refresh and try again; no changes were made.");
+        return;
+    }
+
+    let allocationUpdated = false;
+    let updateResult;
+    try {
+        updateResult = adminData.updateArrayInStorage(
+            STUDENT_STORAGE_KEY,
+            (draftProfiles) => {
+                const profile = draftProfiles.find((item) => item.studentId === studentId);
+                if (!profile || JSON.stringify(profile) !== expectedProfileSnapshot) {
+                    return draftProfiles;
+                }
+                profile.semesterId = targetSemesterId;
+                allocationUpdated = true;
+                return draftProfiles;
+            }
+        );
+    } catch (error) {
+        showAllocationFeedback("The semester allocation could not be saved safely. Existing data was left unchanged.");
+        return;
+    }
+
+    if (!updateResult || !updateResult.success) {
+        showAllocationFeedback(
+            updateResult && updateResult.message
+                ? updateResult.message
+                : "The semester allocation could not be verified. No success was recorded."
+        );
+        return;
+    }
+    if (!allocationUpdated) {
+        showAllocationFeedback("This Student profile changed before the allocation was saved. The directory was refreshed.");
+        return;
+    }
+
+    showAllocationFeedback(
+        `Semester allocation updated for ${studentName}: ${targetLabel}. Admission, authorization, account status, and other profile data were preserved.`,
+        ""
+    );
+}
+
 function createStudentActions(record) {
     const cell = document.createElement("td");
     if (!record.profile) {
@@ -1077,6 +1512,7 @@ function createStudentActions(record) {
 
     createStudentAdmissionActions(record, rowActions, displayName);
     createStudentAuthorizationActions(record, rowActions, displayName);
+    createStudentSemesterAllocationActions(record, rowActions, displayName);
     cell.append(rowActions);
     return cell;
 }
@@ -1091,6 +1527,7 @@ function refreshDirectoryWithAdmissionFeedback(message, state = "error") {
 }
 
 function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus, studentName, actionsElement) {
+    if (!requireAdminAccess()) return;
     if (nextStatus !== "admitted" && nextStatus !== "rejected") return;
     if (studentDirectoryActionsInFlight.has(studentId)) return;
 
@@ -1207,6 +1644,7 @@ function handleStudentAuthorizationDecision(
     studentName,
     actionsElement
 ) {
+    if (!requireAdminAccess()) return;
     const permittedTransitions = {
         pending: new Set(["authorized", "revoked"]),
         authorized: new Set(["revoked"]),
@@ -1351,6 +1789,7 @@ function getStudentDirectoryFilteredRecords() {
 }
 
 function renderStudentDirectoryRows() {
+    if (!requireAdminAccess()) return;
     const tbody = document.querySelector("#studentDirectoryRows");
     const resultStatus = document.querySelector("#studentDirectoryResults");
     tbody.replaceChildren();
@@ -1421,8 +1860,11 @@ function renderStudentDirectoryRows() {
 }
 
 function renderStudentDirectory() {
+    if (!requireAdminAccess()) return;
     studentDirectoryReady = false;
     studentDirectoryRecords = [];
+    studentDirectoryAllocatableSemesters = [];
+    studentDirectoryAllocationDataState = "unavailable";
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentsState = readArrayFromStorage(STUDENT_STORAGE_KEY);
     const semestersState = readArrayFromStorage(SEMESTER_STORAGE_KEY);
@@ -1504,6 +1946,11 @@ function renderStudentDirectory() {
         }
     }
     const semesterById = new Map(semesterRecords.map((semester) => [semester.id, semester]));
+    const allocatableSemesterData = readAllocatableSemesters();
+    if (allocatableSemesterData.success) {
+        studentDirectoryAllocatableSemesters = allocatableSemesterData.semesters;
+        studentDirectoryAllocationDataState = "valid";
+    }
     const profileByUserId = new Map(profiles.map((profile) => [profile.userId, profile]));
     let missingSemesterReferences = 0;
 
@@ -1553,6 +2000,7 @@ function renderStudentDirectory() {
 }
 
 function initializeStudentDirectory() {
+    if (!requireAdminAccess()) return;
     for (const selector of [
         "#studentDirectorySearch",
         "#studentAdmissionFilter",
@@ -1572,6 +2020,490 @@ function initializeStudentDirectory() {
     });
 
     renderStudentDirectory();
+}
+
+let teacherDirectoryRecords = [];
+let teacherDirectoryReady = false;
+
+function setTeacherDirectoryMessage(message, state = "") {
+    const status = document.querySelector("#teacherDirectoryStatus");
+    status.textContent = message;
+    status.classList.toggle("is-error", state === "error");
+    status.classList.toggle("is-warning", state === "warning");
+}
+
+function getTeacherDirectoryFilteredRecords() {
+    const search = document.querySelector("#teacherDirectorySearch").value.trim().toLowerCase();
+    const accountStatus = document.querySelector("#teacherAccountStatusFilter").value;
+    const profileState = document.querySelector("#teacherProfileStateFilter").value;
+
+    return teacherDirectoryRecords.filter((record) => {
+        const searchable = [
+            record.displayName,
+            record.email,
+            record.teacherId
+        ].filter(Boolean).join(" ").toLowerCase();
+        if (search && !searchable.includes(search)) return false;
+        if (accountStatus && record.accountStatusFilter !== accountStatus) return false;
+        if (profileState && record.profileStateFilter !== profileState) return false;
+        return true;
+    });
+}
+
+function renderTeacherDirectoryRows() {
+    if (!requireAdminAccess()) return;
+    const tbody = document.querySelector("#teacherDirectoryRows");
+    const resultStatus = document.querySelector("#teacherDirectoryResults");
+    tbody.replaceChildren();
+    const filteredRecords = getTeacherDirectoryFilteredRecords();
+
+    if (filteredRecords.length === 0) {
+        const row = document.createElement("tr");
+        const cell = document.createElement("td");
+        cell.className = "student-directory-empty-cell";
+        cell.colSpan = 7;
+        if (!teacherDirectoryReady) {
+            cell.textContent = "Teacher data is unavailable.";
+        } else if (teacherDirectoryRecords.length === 0) {
+            cell.textContent = "No Teacher accounts or orphan Teacher profiles exist.";
+        } else {
+            cell.textContent = "No Teachers match the current search and filters.";
+        }
+        row.append(cell);
+        tbody.append(row);
+    } else {
+        for (const record of filteredRecords) {
+            const row = document.createElement("tr");
+            const nameCell = document.createElement("td");
+            const emailCell = document.createElement("td");
+            const teacherIdCell = document.createElement("td");
+            const createdCell = document.createElement("td");
+
+            nameCell.textContent = record.displayName;
+            emailCell.textContent = record.email;
+            teacherIdCell.textContent = record.teacherId;
+            createdCell.textContent = record.createdAt;
+            row.append(nameCell, emailCell);
+            appendDirectoryStatusCell(row, record.accountStatusLabel, record.accountStatusFilter);
+            row.append(teacherIdCell, createdCell);
+            appendDirectoryStatusCell(row, record.profileStateLabel, record.profileStateFilter);
+            const actionCell = document.createElement("td");
+            if (record.canManage) {
+                const actionButton = document.createElement("button");
+                actionButton.type = "button";
+                actionButton.className = "course-reset-button";
+                actionButton.textContent = record.accountStatus === "active" ? "Deactivate" : "Activate";
+                actionButton.addEventListener("click", () => handleTeacherAccountStatusChange(record));
+                actionCell.append(actionButton);
+            } else {
+                actionCell.textContent = record.accountStatus === "pending"
+                    ? "Pending — no action"
+                    : "Unavailable";
+            }
+            row.append(actionCell);
+            tbody.append(row);
+        }
+    }
+
+    if (!teacherDirectoryReady) {
+        resultStatus.textContent = "";
+    } else if (teacherDirectoryRecords.length === 0) {
+        resultStatus.textContent = "";
+    } else {
+        resultStatus.textContent = `Showing ${filteredRecords.length} of ${teacherDirectoryRecords.length} Teacher directory record${teacherDirectoryRecords.length === 1 ? "" : "s"}.`;
+    }
+}
+
+function clearMatchingTeacherSession(userId) {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable." };
+    }
+    let rawSession;
+    try {
+        rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
+        if (rawSession === null) return { success: true };
+        const session = JSON.parse(rawSession);
+        if (!session || session.role !== "teacher" || session.userId !== userId) return { success: true };
+        if (!requireAdminAccess()) {
+            return { success: false, message: "Admin access is unavailable. The session was left unchanged." };
+        }
+        if (localStorage.getItem(SESSION_STORAGE_KEY) !== rawSession) {
+            return { success: false, message: "The active session changed during the account update. Refresh and try again." };
+        }
+        localStorage.removeItem(SESSION_STORAGE_KEY);
+        return { success: true };
+    } catch (error) {
+        return { success: false, message: "The matching Teacher session could not be safely cleared." };
+    }
+}
+
+function handleTeacherAccountStatusChange(record) {
+    if (!requireAdminAccess()) return;
+    if (!teacherDirectoryReady || !record?.canManage) return;
+    const nextStatus = record.accountStatus === "active" ? "disabled" : "active";
+    const currentStatusLabel = record.accountStatus === "active" ? "Active" : "Disabled";
+    const nextStatusLabel = nextStatus === "active" ? "Active" : "Disabled";
+    if (!window.confirm(
+        `Change ${record.displayName} (${record.email}) from ${currentStatusLabel} to ${nextStatusLabel}?${nextStatus === "disabled" ? " This will revoke access on open Teacher pages." : " A fresh valid login will be required before Teacher access resumes."}`
+    )) return;
+
+    const adminData = window.LearnSpaceAdminData;
+    let usersState;
+    let teachersState;
+    let studentsState;
+    try {
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        teachersState = adminData.readArrayFromStorage(TEACHER_STORAGE_KEY);
+        studentsState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+    } catch (error) {
+        setTeacherDirectoryMessage("Teacher account links could not be rechecked. No change was made.", "error");
+        return;
+    }
+    const users = usersState.records || [];
+    const teachers = teachersState.records || [];
+    const students = studentsState.records || [];
+    if (!isReadableArrayState(usersState.state) || !isReadableArrayState(teachersState.state) ||
+        !(studentsState.state === "missing" || isReadableArrayState(studentsState.state)) ||
+        !adminData.validateUsers(users).success ||
+        !adminData.validateProfiles(teachers, "teacher", users).success ||
+        !adminData.validateProfiles(students, "student", users).success) {
+        setTeacherDirectoryMessage("Account or profile data is invalid or unavailable. No change was made.", "error");
+        return;
+    }
+
+    const matchingUsers = users.filter((user) => user.id === record.userId);
+    const matchingTeachers = teachers.filter((profile) => profile.userId === record.userId);
+    const matchingStudents = students.filter((profile) => profile.userId === record.userId);
+    if (matchingUsers.length !== 1 || matchingTeachers.length !== 1 || matchingStudents.length !== 0 ||
+        JSON.stringify(matchingUsers[0]) !== record.userSnapshot ||
+        JSON.stringify(matchingTeachers[0]) !== record.profileSnapshot ||
+        matchingUsers[0].role !== "teacher" || matchingUsers[0].accountStatus !== record.accountStatus ||
+        (record.accountStatus !== "active" && record.accountStatus !== "disabled")) {
+        setTeacherDirectoryMessage("This Teacher record changed or has conflicting links. Refresh the directory before trying again.", "warning");
+        renderTeacherDirectory();
+        return;
+    }
+
+    // Reactivation clears any persisted session first, requiring a fresh login.
+    if (nextStatus === "active") {
+        const sessionResult = clearMatchingTeacherSession(record.userId);
+        if (!sessionResult.success) {
+            setTeacherDirectoryMessage(`${sessionResult.message} The account remains disabled.`, "error");
+            return;
+        }
+    }
+
+    const result = adminData.updateArrayInStorage(USER_STORAGE_KEY, (draftUsers) => {
+        const target = draftUsers.find((user) => user.id === record.userId);
+        if (!target || target.role !== "teacher" || target.accountStatus !== record.accountStatus) {
+            throw new Error("Teacher account changed before the update could be applied.");
+        }
+        target.accountStatus = nextStatus;
+        return draftUsers;
+    });
+    if (!result.success) {
+        setTeacherDirectoryMessage(`${result.message || "Teacher account status could not be updated."} No account data was changed.`, "error");
+        renderTeacherDirectory();
+        return;
+    }
+
+    if (nextStatus === "disabled") clearMatchingTeacherSession(record.userId);
+    setTeacherDirectoryMessage(`${record.displayName} is now ${nextStatus}. Existing Teacher pages will require a new valid login after reactivation.`);
+    renderTeacherDirectory();
+}
+
+function renderTeacherDirectory() {
+    if (!requireAdminAccess()) return;
+    teacherDirectoryReady = false;
+    teacherDirectoryRecords = [];
+    let usersState;
+    let teachersState;
+    let studentsState;
+    const adminData = window.LearnSpaceAdminData;
+
+    try {
+        usersState = adminData.readArrayFromStorage(USER_STORAGE_KEY);
+        teachersState = adminData.readArrayFromStorage(TEACHER_STORAGE_KEY);
+        studentsState = adminData.readArrayFromStorage(STUDENT_STORAGE_KEY);
+    } catch (error) {
+        setTeacherDirectoryMessage("Teacher, account, or Student profile data could not be read safely.", "error");
+        renderTeacherDirectoryRows();
+        return;
+    }
+
+    const users = usersState.state === "missing" ? [] : usersState.records;
+    const teacherProfiles = teachersState.state === "missing" ? [] : teachersState.records;
+    if ((!isReadableArrayState(usersState.state) && usersState.state !== "missing") ||
+        (!isReadableArrayState(teachersState.state) && teachersState.state !== "missing")) {
+        const details = !isReadableArrayState(usersState.state) && usersState.state !== "missing"
+            ? usersState.message || "Account data is malformed or unavailable."
+            : teachersState.message || "Teacher profile data is malformed or unavailable.";
+        setTeacherDirectoryMessage(`${details} The Teacher directory cannot be verified.`, "error");
+        renderTeacherDirectoryRows();
+        return;
+    }
+
+    const usersValidation = adminData.validateUsers(users);
+    const teacherProfilesValidation = adminData.validateProfiles(
+        teacherProfiles,
+        "teacher",
+        users
+    );
+    const studentProfilesReadable = studentsState.state === "missing" ||
+        isReadableArrayState(studentsState.state);
+    const studentProfiles = studentsState.state === "missing" ? [] :
+        studentProfilesReadable ? studentsState.records : [];
+    const studentProfilesValidation = studentProfilesReadable
+        ? adminData.validateProfiles(studentProfiles, "student", users)
+        : { success: false, message: "Student profile data is malformed or unavailable." };
+    // Any readable array can be scanned for userId conflicts, even when one of
+    // its profile records is otherwise invalid. A malformed whole collection
+    // cannot be checked and must not be treated as conflict-free.
+    const crossRoleLinksVerified = studentProfilesReadable;
+
+    const accountIdCounts = new Map();
+    const accountEmailCounts = new Map();
+    for (const user of users) {
+        if (!user || typeof user !== "object" || Array.isArray(user)) continue;
+        if (typeof user.id === "string" && user.id.trim()) {
+            accountIdCounts.set(user.id, (accountIdCounts.get(user.id) || 0) + 1);
+        }
+        const normalizedEmail = String(user.email || "").trim().toLowerCase().replace(/[\r\n]/g, "");
+        if (normalizedEmail) {
+            accountEmailCounts.set(normalizedEmail, (accountEmailCounts.get(normalizedEmail) || 0) + 1);
+        }
+    }
+
+    const teacherIdCounts = new Map();
+    const profileUserIdCounts = new Map();
+    for (const profile of teacherProfiles) {
+        if (!profile || typeof profile !== "object" || Array.isArray(profile)) continue;
+        if (typeof profile.teacherId === "string" && profile.teacherId.trim()) {
+            teacherIdCounts.set(profile.teacherId, (teacherIdCounts.get(profile.teacherId) || 0) + 1);
+        }
+        if (typeof profile.userId === "string" && profile.userId.trim()) {
+            profileUserIdCounts.set(profile.userId, (profileUserIdCounts.get(profile.userId) || 0) + 1);
+        }
+    }
+
+    const studentLinkedUserIds = new Set();
+    for (const profile of studentProfiles) {
+        if (profile && typeof profile === "object" && !Array.isArray(profile) &&
+            typeof profile.userId === "string" && profile.userId.trim()) {
+            studentLinkedUserIds.add(profile.userId);
+        }
+    }
+
+    const teachersByUserId = new Map();
+    for (const profile of teacherProfiles) {
+        if (!profile || typeof profile !== "object" || Array.isArray(profile) ||
+            typeof profile.userId !== "string" || !profile.userId.trim()) continue;
+        if (!teachersByUserId.has(profile.userId)) teachersByUserId.set(profile.userId, []);
+        teachersByUserId.get(profile.userId).push(profile);
+    }
+
+    const directoryAccounts = users.filter((user) =>
+        user && typeof user === "object" && !Array.isArray(user) && user.role === "teacher"
+    );
+    const knownTeacherProfileObjects = new Set();
+
+    for (const user of directoryAccounts) {
+        const displayName = typeof user.name === "string" && user.name.trim()
+            ? user.name.trim()
+            : typeof user.email === "string" && user.email.trim()
+                ? user.email.trim()
+                : "Name unavailable";
+        const email = typeof user.email === "string" && user.email.trim()
+            ? user.email.trim()
+            : "Email unavailable";
+        const normalizedEmail = String(user.email || "").trim().toLowerCase().replace(/[\r\n]/g, "");
+        const accountRecordValidation = adminData.validateUsers([user]);
+        const accountValid = accountRecordValidation.success &&
+            accountIdCounts.get(user.id) === 1 &&
+            accountEmailCounts.get(normalizedEmail) === 1;
+        const linkedProfiles = typeof user.id === "string"
+            ? teachersByUserId.get(user.id) || []
+            : [];
+        const crossRoleConflict = typeof user.id === "string" && studentLinkedUserIds.has(user.id);
+        const accountConflict = !accountValid || accountIdCounts.get(user.id) > 1;
+
+        if (linkedProfiles.length === 0) {
+            let profileState = "missing";
+            let reason = "No Teacher profile is linked to this account.";
+            if (crossRoleConflict) {
+                profileState = "invalid";
+                reason = "This account is also linked to a Student profile.";
+            } else if (!crossRoleLinksVerified) {
+                profileState = "invalid";
+                reason = "Cross-role profile links could not be verified.";
+            } else if (accountConflict) {
+                profileState = "invalid";
+                reason = "The account has conflicting or invalid account data.";
+            }
+            teacherDirectoryRecords.push({
+                displayName,
+                email,
+                accountStatusLabel: accountValid ? user.accountStatus :
+                    `Invalid account data${user.accountStatus ? ` (${user.accountStatus})` : ""}`,
+                accountStatusFilter: accountValid ? user.accountStatus : "invalid",
+                teacherId: "—",
+                createdAt: "—",
+                profileStateLabel: profileState === "missing" ? "Missing profile" : `Invalid profile — ${reason}`,
+                profileStateFilter: profileState
+            });
+            continue;
+        }
+
+        for (const profile of linkedProfiles) {
+            knownTeacherProfileObjects.add(profile);
+            const profileValidation = adminData.validateProfiles([profile], "teacher", [user]);
+            const duplicateTeacherId = typeof profile.teacherId === "string" &&
+                teacherIdCounts.get(profile.teacherId) > 1;
+            const duplicateProfileLink = profileUserIdCounts.get(user.id) > 1;
+            let profileValid = profileValidation.success && !duplicateTeacherId &&
+                !duplicateProfileLink && !crossRoleConflict && crossRoleLinksVerified &&
+                accountValid;
+            let profileReason = "";
+            if (crossRoleConflict) {
+                profileReason = "Account is also linked to a Student profile.";
+            } else if (!crossRoleLinksVerified) {
+                profileReason = "Cross-role profile links could not be verified.";
+            } else if (accountConflict) {
+                profileReason = "Linked account data is invalid or duplicated.";
+            } else if (duplicateTeacherId) {
+                profileReason = "Teacher ID is duplicated.";
+            } else if (duplicateProfileLink) {
+                profileReason = "Multiple Teacher profiles link to this account.";
+            } else if (!profileValidation.success) {
+                profileReason = profileValidation.message;
+            }
+
+            const createdAt = profile.createdAt && hasValidCreatedAt(profile.createdAt)
+                ? new Date(profile.createdAt).toLocaleDateString()
+                : "Unavailable";
+            teacherDirectoryRecords.push({
+                displayName,
+                email,
+                accountStatusLabel: accountValid ? user.accountStatus :
+                    `Invalid account data${user.accountStatus ? ` (${user.accountStatus})` : ""}`,
+                accountStatusFilter: accountValid ? user.accountStatus : "invalid",
+                teacherId: typeof profile.teacherId === "string" && profile.teacherId.trim()
+                    ? profile.teacherId
+                    : "Unavailable",
+                createdAt,
+                profileStateLabel: profileValid ? "Valid profile" : `Invalid profile — ${profileReason || "Profile data is invalid."}`,
+                profileStateFilter: profileValid ? "valid" : "invalid",
+                userId: user.id,
+                accountStatus: user.accountStatus,
+                canManage: profileValid && (user.accountStatus === "active" || user.accountStatus === "disabled"),
+                userSnapshot: JSON.stringify(user),
+                profileSnapshot: JSON.stringify(profile)
+            });
+        }
+    }
+
+    for (const [index, profile] of teacherProfiles.entries()) {
+        if (knownTeacherProfileObjects.has(profile)) continue;
+        const isObject = profile && typeof profile === "object" && !Array.isArray(profile);
+        const matchingAccounts = isObject && typeof profile.userId === "string"
+            ? users.filter((user) => user && typeof user === "object" && user.id === profile.userId)
+            : [];
+        const matchingTeacherAccounts = matchingAccounts.filter((user) => user.role === "teacher");
+        const linkedAccount = matchingAccounts[0];
+        const crossRoleConflict = isObject && typeof profile.userId === "string" &&
+            studentLinkedUserIds.has(profile.userId);
+        const profileValidation = isObject && matchingTeacherAccounts.length === 1
+            ? adminData.validateProfiles([profile], "teacher", [matchingTeacherAccounts[0]])
+            : { success: false, message: crossRoleConflict
+                ? "Account is also linked to a Student profile."
+                : matchingAccounts.length
+                    ? "Teacher profile links to an account with a different role or duplicate ID."
+                    : "Teacher profile has no linked account." };
+        const teacherId = isObject && typeof profile.teacherId === "string" && profile.teacherId.trim()
+            ? profile.teacherId
+            : "Unavailable";
+        const createdAt = isObject && hasValidCreatedAt(profile.createdAt)
+            ? new Date(profile.createdAt).toLocaleDateString()
+            : "Unavailable";
+        teacherDirectoryRecords.push({
+            displayName: isObject ? "Orphan Teacher profile" : `Invalid Teacher profile record ${index + 1}`,
+            email: linkedAccount && typeof linkedAccount.email === "string"
+                ? linkedAccount.email
+                : isObject && typeof profile.userId === "string"
+                    ? `No Teacher account (${profile.userId})`
+                    : "Account unavailable",
+            accountStatusLabel: linkedAccount && linkedAccount.role === "teacher"
+                ? linkedAccount.accountStatus
+                : "No linked Teacher account",
+            accountStatusFilter: linkedAccount && linkedAccount.role === "teacher"
+                ? linkedAccount.accountStatus
+                : "invalid",
+            teacherId,
+            createdAt,
+            profileStateLabel: `Invalid profile — ${crossRoleConflict
+                ? "Account is also linked to a Student profile."
+                : !crossRoleLinksVerified
+                    ? "Cross-role profile links could not be verified."
+                    : profileValidation.message}`,
+            profileStateFilter: "invalid"
+        });
+    }
+
+    const invalidAccountRecords = users.filter((user) =>
+        !user || typeof user !== "object" || Array.isArray(user) ||
+        !["student", "teacher", "admin"].includes(user.role)
+    );
+    for (const [index] of invalidAccountRecords.entries()) {
+        teacherDirectoryRecords.push({
+            displayName: `Unclassified account record ${index + 1}`,
+            email: "Unavailable",
+            accountStatusLabel: "Invalid account data",
+            accountStatusFilter: "invalid",
+            teacherId: "—",
+            createdAt: "—",
+            profileStateLabel: "Invalid profile — account role could not be verified.",
+            profileStateFilter: "invalid"
+        });
+    }
+
+    teacherDirectoryReady = true;
+    const attentionCount = teacherDirectoryRecords.filter((record) =>
+        record.accountStatusFilter === "invalid" ||
+        record.profileStateFilter === "invalid" ||
+        record.profileStateFilter === "missing"
+    ).length;
+    const messages = [];
+    if (!usersValidation.success) messages.push(`Account collection contains invalid or conflicting records: ${usersValidation.message}`);
+    if (!teacherProfilesValidation.success) messages.push(`Teacher profile collection contains invalid or conflicting records: ${teacherProfilesValidation.message}`);
+    if (studentProfilesReadable && !studentProfilesValidation.success) {
+        messages.push(`Student profiles contain invalid records; readable user links were checked for cross-role conflicts. ${studentProfilesValidation.message}`);
+    }
+    if (!crossRoleLinksVerified) messages.push("Student profile data could not be fully validated, so cross-role links are marked invalid until checked.");
+    if (attentionCount > 0) messages.push(`${attentionCount} directory record${attentionCount === 1 ? " requires" : "s require"} administrative attention.`);
+    if (directoryAccounts.length === 0 && teacherProfiles.length === 0 && invalidAccountRecords.length === 0) {
+        messages.push("No Teacher accounts exist.");
+    }
+    setTeacherDirectoryMessage(
+        messages.length ? messages.join(" ") : `Showing ${directoryAccounts.length} validated Teacher account${directoryAccounts.length === 1 ? "" : "s"}.`,
+        attentionCount > 0 || !usersValidation.success || !teacherProfilesValidation.success || !crossRoleLinksVerified
+            ? "warning"
+            : ""
+    );
+    renderTeacherDirectoryRows();
+}
+
+function initializeTeacherDirectory() {
+    if (!requireAdminAccess()) return;
+    document.querySelector("#teacherDirectorySearch").addEventListener("input", renderTeacherDirectoryRows);
+    document.querySelector("#teacherAccountStatusFilter").addEventListener("change", renderTeacherDirectoryRows);
+    document.querySelector("#teacherProfileStateFilter").addEventListener("change", renderTeacherDirectoryRows);
+    document.querySelector("#resetTeacherFilters").addEventListener("click", () => {
+        document.querySelector("#teacherDirectorySearch").value = "";
+        document.querySelector("#teacherAccountStatusFilter").value = "";
+        document.querySelector("#teacherProfileStateFilter").value = "";
+        renderTeacherDirectoryRows();
+    });
+    renderTeacherDirectory();
 }
 
 function getDemoSessionMessage(usersState) {
@@ -1689,6 +2621,7 @@ function renderDuplicateMappingWarning(duplicateGroups, listElement) {
 }
 
 function handleDuplicateMembershipRepair(semester, duplicate) {
+    if (!requireAdminAccess()) return;
     let result;
     try {
         result = repairDuplicateSemesterMembership(
@@ -1811,6 +2744,7 @@ function setMappingActionError(message) {
 }
 
 function handleSemesterCourseAssignment(semesterSnapshot, courseId, expectedCourse, expectedSemester) {
+    if (!requireAdminAccess()) return;
     if (typeof courseId !== "string" || !courseId.trim()) {
         setMappingActionError("Choose an available curriculum course before assigning it.");
         return;
@@ -1892,6 +2826,7 @@ function handleSemesterCourseAssignment(semesterSnapshot, courseId, expectedCour
 }
 
 function handleSemesterCourseRemoval(semesterSnapshot, course, expectedSemester, expectedCourse) {
+    if (!requireAdminAccess()) return;
     const courseId = course && course.id;
     const currentData = readCurrentMappingData();
     if (!currentData.success) {
@@ -2210,6 +3145,7 @@ function setAcademicManagementControlsDisabled(disabled) {
 }
 
 function renderAcademicStructure() {
+    if (!requireAdminAccess()) return;
     setAcademicManagementControlsDisabled(false);
     const adminData = window.LearnSpaceAdminData;
     const semesterStatus = document.querySelector("#semesterViewStatus");
@@ -2378,6 +3314,7 @@ function setCourseFormMode(isEditing) {
 }
 
 function startCourseEditing(courseId) {
+    if (!requireAdminAccess()) return;
     const adminData = window.LearnSpaceAdminData;
     let snapshot;
     try {
@@ -2443,6 +3380,7 @@ function getCourseCreationStorageError(snapshot) {
 
 function handleAddCourseSubmit(event) {
     event.preventDefault();
+    if (!requireAdminAccess()) return;
 
     const form = event.currentTarget;
     const codeInput = document.querySelector("#courseCode");
@@ -2534,6 +3472,7 @@ function handleAddCourseSubmit(event) {
 }
 
 function handleEditCourseSubmit(code, name, description) {
+    if (!requireAdminAccess()) return;
     const courseId = selectedCurriculumCourseId;
     const adminData = window.LearnSpaceAdminData;
     let snapshot;
@@ -2622,6 +3561,7 @@ function handleEditCourseSubmit(code, name, description) {
 }
 
 function initializeCourseForm() {
+    if (!requireAdminAccess()) return;
     const form = document.querySelector("#addCourseForm");
     form.addEventListener("submit", handleAddCourseSubmit);
     form.addEventListener("reset", () => setCourseFormFeedback(""));
@@ -2632,6 +3572,7 @@ function initializeCourseForm() {
 }
 
 function initializeSemesterForm() {
+    if (!requireAdminAccess()) return;
     const form = document.querySelector("#addSemesterForm");
     form.addEventListener("submit", handleAddSemesterSubmit);
     form.addEventListener("reset", () => {
@@ -2702,6 +3643,7 @@ function readSemesterDataForEditing() {
 }
 
 function changeSemesterStatus(semesterId, expectedSnapshot) {
+    if (!requireAdminAccess()) return;
     const readResult = readSemesterDataForEditing();
     if (!readResult.success) {
         setSemesterFormFeedback(readResult.message, true);
@@ -2788,6 +3730,7 @@ function changeSemesterStatus(semesterId, expectedSnapshot) {
 }
 
 function startSemesterEditing(semesterId) {
+    if (!requireAdminAccess()) return;
     const result = readSemesterDataForEditing();
     if (!result.success) {
         setSemesterFormFeedback(result.message, true);
@@ -2819,6 +3762,7 @@ function cancelSemesterEditing() {
 }
 
 function handleEditSemesterSubmit(name, academicYear) {
+    if (!requireAdminAccess()) return;
     const semesterId = selectedSemesterId;
     const result = readSemesterDataForEditing();
     if (!result.success) {
@@ -2920,6 +3864,7 @@ function getSemesterCreationStorageError(snapshot) {
 
 function handleAddSemesterSubmit(event) {
     event.preventDefault();
+    if (!requireAdminAccess()) return;
 
     const form = event.currentTarget;
     const name = document.querySelector("#semesterName").value.trim();
@@ -3024,6 +3969,7 @@ function handleAddSemesterSubmit(event) {
 }
 
 function renderDashboardSummary() {
+    if (!requireAdminAccess()) return;
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentCount = getProfileCount(STUDENT_STORAGE_KEY, "student", usersState);
     const teacherCount = getProfileCount(TEACHER_STORAGE_KEY, "teacher", usersState);
@@ -3038,8 +3984,18 @@ function renderDashboardSummary() {
     );
 }
 
-renderDashboardSummary();
-renderAcademicStructure();
-initializeCourseForm();
-initializeSemesterForm();
-initializeStudentDirectory();
+window.addEventListener("storage", handleAdminAccessStorageChange);
+window.addEventListener("focus", requireAdminAccess);
+window.addEventListener("pageshow", requireAdminAccess);
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) requireAdminAccess();
+});
+
+if (requireAdminAccess()) {
+    renderDashboardSummary();
+    renderAcademicStructure();
+    initializeCourseForm();
+    initializeSemesterForm();
+    initializeStudentDirectory();
+    initializeTeacherDirectory();
+}
