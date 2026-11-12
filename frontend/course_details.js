@@ -14,7 +14,8 @@ const STUDENT_ACCESS_STORAGE_KEYS = new Set([
     "learnspaceStudents",
     "learnspaceTeachers",
     "learnspaceCurriculumCourses",
-    "learnspaceSemesters"
+    "learnspaceSemesters",
+    COURSE_STORAGE_KEY
 ]);
 // const ATTENDANCE_THRESHOLD = 75; // Example only; not an official rule.
 
@@ -81,6 +82,16 @@ function ensureStudentAccess(expectedStudentId = verifiedStudentId) {
         verifiedStudentId &&
         expectedStudentId === verifiedStudentId &&
         currentAccess.studentId === verifiedStudentId) {
+        if (courseId) {
+            const eligibility = readCurrentEligibleOffering();
+            if (!eligibility.success) {
+                clearIneligibleCourse(
+                    eligibility.message ||
+                    "This course is not available for your active semester."
+                );
+                return null;
+            }
+        }
         studentAccessGranted = true;
         return currentAccess;
     }
@@ -96,23 +107,39 @@ function ensureStudentAccess(expectedStudentId = verifiedStudentId) {
     }
     activeAssignment = null;
     selectedSubmissionFiles = [];
+    activeCourse = null;
     showMessage("Your access to this course could not be verified.");
     return null;
 }
 
-// Read teacher-created courses from localStorage.
-function readTeacherCourses() {
-    if (!ensureStudentAccess()) return [];
-
-    try {
-        const courses = JSON.parse(
-            localStorage.getItem(COURSE_STORAGE_KEY) || "[]"
-        );
-        return Array.isArray(courses) ? courses : [];
-    } catch (error) {
-        console.error("Could not load teacher courses:", error);
-        return [];
+function readCurrentEligibleOffering() {
+    const resolver = window.LearnSpaceStudentOfferings;
+    if (!resolver || typeof resolver.readEligibleOfferings !== "function") {
+        return { success: false, message: "Course eligibility validation is unavailable." };
     }
+    try {
+        const snapshot = resolver.readEligibleOfferings();
+        if (!snapshot.success) return snapshot;
+        const offering = snapshot.offerings.find((item) => item.id === courseId);
+        return offering
+            ? { success: true, offering, access: snapshot.access }
+            : { success: false, message: "This course is not available for your active semester." };
+    } catch (error) {
+        return { success: false, message: "Course eligibility could not be verified." };
+    }
+}
+
+function clearIneligibleCourse(message) {
+    studentAccessGranted = false;
+    activeCourse = null;
+    activeAssignment = null;
+    selectedSubmissionFiles = [];
+    if (deadlineTimer !== null) {
+        window.clearTimeout(deadlineTimer);
+        deadlineTimer = null;
+    }
+    if (assignmentDialog.open) assignmentDialog.close();
+    showMessage(message);
 }
 
 const COURSE_CONTENT_ARRAY_FIELDS = [
@@ -168,6 +195,10 @@ function normalizeCourseContent(data) {
 // values must parse and have valid collection shapes before they are used.
 function readCourseContent(selectedCourseId) {
     if (!ensureStudentAccess()) return null;
+    if (selectedCourseId !== courseId) {
+        clearIneligibleCourse("This course is not available for your active semester.");
+        return null;
+    }
 
     let rawValue;
     try {
@@ -219,6 +250,10 @@ function writeCourseContent(
     expectedRawValue
 ) {
     if (!ensureStudentAccess(expectedStudentId)) return false;
+    if (selectedCourseId !== courseId) {
+        clearIneligibleCourse("This course is not available for your active semester.");
+        return false;
+    }
     courseContentStale = false;
 
     if (expectedRawValue === undefined) return false;
@@ -535,9 +570,14 @@ function mapTeacherAssignments(assignments, submissions) {
 // Find the selected course and adapt teacher data for the student interface.
 function getSelectedCourse() {
     if (!ensureStudentAccess() || !courseId) return null;
-
-    const teacherCourse = readTeacherCourses()
-        .find((item) => String(item.id) === courseId);
+    const eligibility = readCurrentEligibleOffering();
+    if (!eligibility.success) {
+        clearIneligibleCourse(
+            eligibility.message || "This course is not available for your active semester."
+        );
+        return null;
+    }
+    const teacherCourse = eligibility.offering;
 
     if (teacherCourse) {
         let content = readCourseContent(courseId);
@@ -1792,7 +1832,7 @@ function refreshPageSubmissionState() {
     const access = ensureStudentAccess(verifiedStudentId);
     if (!access) return;
 
-    if (!wasGranted) {
+    if (!wasGranted || !activeCourse) {
         activeCourse = getSelectedCourse();
         if (!activeCourse) {
             showMessage(courseContentInvalid

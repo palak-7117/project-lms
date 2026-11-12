@@ -8,7 +8,8 @@ const STUDENT_ACCESS_STORAGE_KEYS = new Set([
     "learnspaceStudents",
     "learnspaceTeachers",
     "learnspaceCurriculumCourses",
-    "learnspaceSemesters"
+    "learnspaceSemesters",
+    TEACHER_COURSES_KEY
 ]);
 // const sampleCourses = Array.isArray(window.courseCatalog)
 //     ? window.courseCatalog
@@ -73,7 +74,20 @@ function showAccessDenied(result) {
     courseGrid.append(message);
 }
 
-function refreshStudentAccess({ initialLoad = false } = {}) {
+function showCatalogUnavailable(messageText) {
+    courses = [];
+    coursesLoaded = false;
+    courseGrid.replaceChildren();
+    courseCount.textContent = "Courses unavailable";
+    const message = document.createElement("p");
+    message.className = "courses-access-message";
+    message.setAttribute("role", "status");
+    message.textContent = messageText ||
+        "Course eligibility could not be verified. Please try again or contact an administrator.";
+    courseGrid.append(message);
+}
+
+function refreshStudentAccess({ initialLoad = false, refreshCatalog = false } = {}) {
     const result = evaluateStudentAccess();
     if (!result.allowed) {
         showAccessDenied(result);
@@ -98,9 +112,25 @@ function refreshStudentAccess({ initialLoad = false } = {}) {
 
     const wasGranted = studentAccessGranted;
     currentAccessDenialCode = "";
-    if (!wasGranted || !coursesLoaded) {
-        studentAccessGranted = true;
-        courses = loadTeacherCourses();
+    studentAccessGranted = true;
+    if (refreshCatalog || !wasGranted || !coursesLoaded) {
+        const offeringResolver = window.LearnSpaceStudentOfferings;
+        if (!offeringResolver || typeof offeringResolver.readEligibleOfferings !== "function") {
+            showCatalogUnavailable("Course eligibility validation is unavailable.");
+            return false;
+        }
+        const catalog = offeringResolver.readEligibleOfferings();
+        if (!catalog.success) {
+            showCatalogUnavailable(catalog.message);
+            return false;
+        }
+        courses = catalog.offerings.map((offering) => ({
+            id: offering.id,
+            title: offering.name || "Untitled course",
+            description: offering.description || "",
+            icon: offering.icon || "✳",
+            coverUrl: offering.coverUrl || offering.coverImage || offering.image || ""
+        }));
         coursesLoaded = true;
         renderCourses();
     }
@@ -108,40 +138,7 @@ function refreshStudentAccess({ initialLoad = false } = {}) {
     return true;
 }
 
-function loadTeacherCourses() {
-    try {
-        const savedData = localStorage.getItem(TEACHER_COURSES_KEY);
-
-        if (savedData === null) {
-            return [];
-        }
-
-        const parsedCourses = JSON.parse(savedData);
-
-        if (!Array.isArray(parsedCourses)) {
-            return [];
-        }
-
-        return parsedCourses
-            .filter((course) => course && course.id)
-            .map((course) => ({
-                id: String(course.id),
-                title: course.name || course.title || "Untitled course",
-                description: course.description || "",
-                icon: course.icon || "✳",
-                coverUrl: course.coverUrl || course.coverImage || course.image || ""
-            }));
-    } catch (error) {
-        console.error("Could not load teacher courses:", error);
-        return [];
-    }
-}
-
-// Use teacher courses as the only source when available.
-// Otherwise, show the existing sample catalog as a fallback.
-// const courses = teacherCourses.length > 0
-//     ? teacherCourses
-//     : sampleCourses;
+// The Student-safe resolver returns only offerings eligible for this semester.
 
 function renderCourses() {
     courseGrid.replaceChildren();
@@ -153,7 +150,7 @@ function renderCourses() {
         const emptyMessage = document.createElement("p");
         emptyMessage.className = "courses-empty-state";
         emptyMessage.textContent =
-            "No courses have been added yet. Courses will appear here once a teacher adds them.";
+            "No course offerings are available for your semester yet.";
         courseGrid.append(emptyMessage);
     }
 
@@ -207,7 +204,8 @@ function renderCourses() {
         open.append(openText, arrow);
 
         open.addEventListener("click", () => {
-            if (!refreshStudentAccess()) return;
+            if (!refreshStudentAccess({ refreshCatalog: true })) return;
+            if (!courses.some((item) => item.id === course.id)) return;
 
             window.location.href =
                 `course_details.html?course=${encodeURIComponent(course.id)}`;
@@ -228,7 +226,7 @@ function isStudentAccessStorageChange(event) {
 }
 
 function handleStudentAccessLifecycleChange() {
-    refreshStudentAccess();
+    refreshStudentAccess({ refreshCatalog: true });
 }
 
 window.addEventListener("storage", (event) => {
