@@ -6,9 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Course Workspace | LearnSpace</title>
     <link rel="stylesheet" href="style.css">
-    <script src="teacher-access.js" defer></script>
-    <script src="teacher-offerings.js" defer></script>
-    <script src="course-detail.js" defer></script>
+    <script src="api-client.js" defer></script>
+    <script src="auth-guard.js" data-required-role="teacher" data-app-scripts="teacher-access.js,teacher-offerings.js,course-detail.js" defer></script>
 </head>
 <body class="course-detail-page">
 

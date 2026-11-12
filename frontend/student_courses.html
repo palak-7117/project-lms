@@ -7,9 +7,8 @@
     <title>LearnSpace | Your Courses</title>
     <link rel="stylesheet" href="student_courses.css">
     <!-- <script src="course_data.js" defer></script> -->
-    <script src="student-access.js" defer></script>
-    <script src="student-offerings.js" defer></script>
-    <script src="student_courses.js" defer></script>
+    <script src="api-client.js" defer></script>
+    <script src="auth-guard.js" data-required-role="student" data-app-scripts="student-access.js,student-offerings.js,student_courses.js,student-enrollment.js" defer></script>
 </head>
 <body>
     <main class="page-shell">
@@ -20,6 +19,19 @@
             </a>
             <div class="header-right"><span class="header-note">Your learning journey starts here.</span><button class="profile-mark" type="button" aria-label="Student profile">S</button></div>
         </header>
+
+        <section class="courses-section enrollment-request-panel" aria-labelledby="enrollmentRequestTitle">
+            <div class="section-heading"><div><p class="eyebrow">ACADEMIC ALLOCATION</p><h2 id="enrollmentRequestTitle">Semester enrollment</h2></div></div>
+            <p class="data-state" id="studentEnrollmentStatus" role="status" aria-live="polite">Loading enrollment options…</p>
+            <form id="studentEnrollmentForm" class="course-form-panel">
+                <div class="course-form-fields"><div class="form-field">
+                    <label for="studentEnrollmentSemester">Request an active semester</label>
+                    <select id="studentEnrollmentSemester" name="semesterId" required><option value="">Choose a semester</option></select>
+                </div></div>
+                <div class="course-form-actions"><button class="course-submit-button" type="submit">Send request</button></div>
+            </form>
+            <div class="course-content-list" id="studentEnrollmentRequests"></div>
+        </section>
 
         <section class="welcome-section" aria-labelledby="pageTitle">
             <p class="eyebrow">YOUR LEARNING SPACE</p>

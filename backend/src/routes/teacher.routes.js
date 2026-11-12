@@ -1,0 +1,34 @@
+const express = require("express");
+const router = express.Router();
+const asyncHandler = require("../utils/asyncHandler");
+const requireAuth = require("../middleware/requireAuth");
+const requireRole = require("../middleware/requireRole");
+const requireCsrf = require("../middleware/requireCsrf");
+const upload = require("../middleware/upload");
+const controller = require("../controllers/teacher.controller");
+
+router.use(requireAuth, requireRole("teacher"));
+router.get("/curriculum-subjects", asyncHandler(controller.curriculum));
+router.get("/offerings", asyncHandler(controller.offerings));
+router.post("/offerings", requireCsrf, asyncHandler(controller.createOffering));
+router.get("/offerings/:offeringId", asyncHandler(controller.offering));
+router.patch("/offerings/:offeringId", requireCsrf, asyncHandler(controller.updateOffering));
+router.delete("/offerings/:offeringId", requireCsrf, asyncHandler(controller.deleteOffering));
+router.post("/offerings/:offeringId/materials", requireCsrf, upload.single, asyncHandler(controller.createMaterial));
+router.patch("/materials/:materialId", requireCsrf, asyncHandler(controller.updateMaterial));
+router.delete("/materials/:materialId", requireCsrf, asyncHandler(controller.deleteMaterial));
+router.post("/offerings/:offeringId/assignments", requireCsrf, asyncHandler(controller.createAssignment));
+router.patch("/assignments/:assignmentId", requireCsrf, asyncHandler(controller.updateAssignment));
+router.delete("/assignments/:assignmentId", requireCsrf, asyncHandler(controller.deleteAssignment));
+router.get("/assignments/:assignmentId/submissions", asyncHandler(controller.submissions));
+router.patch("/submissions/:submissionId/grade", requireCsrf, asyncHandler(controller.gradeSubmission));
+router.post("/offerings/:offeringId/quizzes", requireCsrf, asyncHandler(controller.createQuiz));
+router.patch("/quizzes/:quizId", requireCsrf, asyncHandler(controller.updateQuiz));
+router.delete("/quizzes/:quizId", requireCsrf, asyncHandler(controller.deleteQuiz));
+router.get("/offerings/:offeringId/attendance-sessions", asyncHandler(controller.attendanceSessions));
+router.post("/offerings/:offeringId/attendance-sessions", requireCsrf, asyncHandler(controller.createAttendanceSession));
+router.get("/offerings/:offeringId/eligible-students", asyncHandler(controller.eligibleStudents));
+router.get("/attendance-sessions/:sessionId/roster", asyncHandler(controller.attendanceRoster));
+router.put("/attendance-sessions/:sessionId/records/:studentProfileId", requireCsrf, asyncHandler(controller.markAttendance));
+
+module.exports = router;
