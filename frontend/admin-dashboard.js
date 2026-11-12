@@ -23,10 +23,152 @@ let selectedCurriculumCourseId = null;
 let selectedCurriculumCourseSnapshot = null;
 let selectedSemesterId = null;
 let selectedSemesterSnapshot = null;
+let adminAccessLocked = false;
+let authorizedAdminSessionRaw = null;
+let authorizedAdminUserId = null;
+
+function evaluateAdminAccess() {
+    let sessionRaw;
+    let usersRaw;
+    try {
+        sessionRaw = localStorage.getItem(SESSION_STORAGE_KEY);
+        usersRaw = localStorage.getItem(USER_STORAGE_KEY);
+    } catch (error) {
+        return { allowed: false, message: "Admin session or account data is unavailable." };
+    }
+    if (sessionRaw === null || usersRaw === null) {
+        return { allowed: false, message: "Sign in with an active Admin account to use this dashboard." };
+    }
+
+    let session;
+    let users;
+    try {
+        session = JSON.parse(sessionRaw);
+        users = JSON.parse(usersRaw);
+    } catch (error) {
+        return { allowed: false, message: "Admin session or account data is malformed." };
+    }
+    if (!session || typeof session !== "object" || Array.isArray(session) ||
+        typeof session.userId !== "string" || !session.userId.trim() ||
+        session.role !== "admin" || session.mode !== "demo" ||
+        !hasValidCreatedAt(session.createdAt)) {
+        return { allowed: false, message: "The saved session is not a valid Admin session." };
+    }
+    if (!Array.isArray(users)) {
+        return { allowed: false, message: "Admin account data is not a valid list." };
+    }
+
+    const usersValidation = validateUsers(users);
+    if (!usersValidation.success) {
+        return { allowed: false, message: "Admin account data could not be validated." };
+    }
+    const matchingUsers = users.filter((user) => user.id === session.userId);
+    if (matchingUsers.length !== 1 || matchingUsers[0].role !== "admin" ||
+        matchingUsers[0].accountStatus !== "active") {
+        return { allowed: false, message: "The session is not linked to exactly one active Admin account." };
+    }
+
+    try {
+        if (localStorage.getItem(SESSION_STORAGE_KEY) !== sessionRaw ||
+            localStorage.getItem(USER_STORAGE_KEY) !== usersRaw) {
+            return { allowed: false, message: "Admin session or account data changed during validation." };
+        }
+    } catch (error) {
+        return { allowed: false, message: "Admin session or account data could not be rechecked." };
+    }
+
+    return {
+        allowed: true,
+        sessionRaw,
+        userId: session.userId,
+        usersRaw
+    };
+}
+
+function renderAdminAccessDenied(message) {
+    const layout = document.querySelector(".admin-layout");
+    if (layout) layout.hidden = true;
+
+    let deniedView = document.querySelector("#adminAccessDenied");
+    if (!deniedView) {
+        deniedView = document.createElement("main");
+        deniedView.id = "adminAccessDenied";
+        deniedView.className = "admin-main data-state is-error";
+        deniedView.setAttribute("role", "alert");
+        const heading = document.createElement("h1");
+        heading.textContent = "Admin access unavailable";
+        const copy = document.createElement("p");
+        const returnLink = document.createElement("a");
+        returnLink.href = "index.html";
+        returnLink.textContent = "Return to sign in";
+        deniedView.append(heading, copy, returnLink);
+        const topbar = document.querySelector(".admin-topbar");
+        if (topbar) topbar.insertAdjacentElement("afterend", deniedView);
+        else document.body.prepend(deniedView);
+    }
+    deniedView.querySelector("p").textContent = message ||
+        "Sign in with an active Admin account, then reload this page.";
+}
+
+function revokeAdminAccess(message) {
+    adminAccessLocked = true;
+    renderAdminAccessDenied(message ||
+        "Admin access was revoked. Sign in again with an active Admin account and reload this page.");
+    return false;
+}
+
+function requireAdminAccess() {
+    if (adminAccessLocked) return false;
+    const access = evaluateAdminAccess();
+    if (!access.allowed) return revokeAdminAccess(access.message);
+    if (authorizedAdminSessionRaw === null) {
+        authorizedAdminSessionRaw = access.sessionRaw;
+        authorizedAdminUserId = access.userId;
+    } else if (access.sessionRaw !== authorizedAdminSessionRaw ||
+        access.userId !== authorizedAdminUserId) {
+        return revokeAdminAccess("The Admin session changed. Sign in again and reload this page.");
+    }
+    return true;
+}
+
+function isActiveAdminInUserSnapshot(rawValue, userId) {
+    if (rawValue === null) return false;
+    try {
+        const users = JSON.parse(rawValue);
+        if (!Array.isArray(users) || !validateUsers(users).success) return false;
+        const matches = users.filter((user) => user.id === userId);
+        return matches.length === 1 && matches[0].role === "admin" &&
+            matches[0].accountStatus === "active";
+    } catch (error) {
+        return false;
+    }
+}
+
+function handleAdminAccessStorageChange(event) {
+    if (adminAccessLocked) return;
+    if (event.key === null) {
+        revokeAdminAccess("Browser storage changed. Sign in again as an active Admin and reload this page.");
+        return;
+    }
+    if (event.key === SESSION_STORAGE_KEY &&
+        event.newValue !== authorizedAdminSessionRaw) {
+        revokeAdminAccess("The Admin session changed. Sign in again and reload this page.");
+        return;
+    }
+    if (event.key === USER_STORAGE_KEY &&
+        !isActiveAdminInUserSnapshot(event.newValue, authorizedAdminUserId)) {
+        revokeAdminAccess("The Admin account is no longer active or valid. Sign in again and reload this page.");
+        return;
+    }
+    requireAdminAccess();
+}
 
 // These helpers support Admin accounts, profiles, semesters, and official
 // curriculum. Teacher offerings and their content keys are not accepted here.
 function readArrayFromStorage(key) {
+    if (!requireAdminAccess()) {
+        return { state: "unavailable", message: "Admin access is unavailable. No data was read." };
+    }
     if (!ADMIN_ARRAY_STORAGE_KEYS.has(key)) {
         return {
             state: "unavailable",
@@ -525,6 +667,9 @@ function preserveExistingFields(proposedRecords, existingRecords, idField) {
 }
 
 function restoreSingleKeyIfStillOurs(key, previousValue, attemptedValue) {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable; recovery was not attempted." };
+    }
     try {
         const currentValue = localStorage.getItem(key);
         if (currentValue === previousValue) return { success: true };
@@ -587,6 +732,9 @@ const runSafeArrayUpdate = (
     validateExisting = validateCollectionForKey,
     validateProposed = validateCollectionForKey
 ) => {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable. No data was changed." };
+    }
     if (!ADMIN_ARRAY_STORAGE_KEYS.has(key)) {
         return { success: false, message: "This storage key is outside the Admin data helper scope." };
     }
@@ -678,6 +826,9 @@ const runSafeArrayUpdate = (
     }
 
     try {
+        if (!requireAdminAccess()) {
+            return { success: false, message: "Admin access is unavailable. No data was changed." };
+        }
         if (localStorage.getItem(key) !== snapshot.rawValue) {
             return { success: false, message: "Saved data changed in another tab. Refresh and try again; no values were overwritten." };
         }
@@ -773,6 +924,9 @@ const repairDuplicateSemesterMembership = (
     expectedSemesterSnapshot,
     expectedDuplicateSemesterIds
 ) => {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable. No data was changed." };
+    }
     if (typeof semesterId !== "string" || !semesterId.trim() ||
         typeof courseId !== "string" || !courseId.trim() ||
         !expectedSemesterSnapshot || typeof expectedSemesterSnapshot !== "object" ||
@@ -853,14 +1007,36 @@ const repairDuplicateSemesterMembership = (
 
 // Reusable by Admin workflows. The allowlist excludes legacy teacher course
 // offerings and all course-content keys.
+function deniedAdminValidationResult() {
+    return { success: false, message: "Admin access is unavailable." };
+}
+
 window.LearnSpaceAdminData = Object.freeze({
-    readArrayFromStorage,
-    validateRecordIds,
-    validateUsers,
-    validateProfiles,
-    validateSemesters,
-    validateCurriculumCourses,
-    updateArrayInStorage
+    readArrayFromStorage(...args) {
+        return requireAdminAccess()
+            ? readArrayFromStorage(...args)
+            : { state: "unavailable", message: "Admin access is unavailable. No data was read." };
+    },
+    validateRecordIds(...args) {
+        return requireAdminAccess() ? validateRecordIds(...args) : deniedAdminValidationResult();
+    },
+    validateUsers(...args) {
+        return requireAdminAccess() ? validateUsers(...args) : deniedAdminValidationResult();
+    },
+    validateProfiles(...args) {
+        return requireAdminAccess() ? validateProfiles(...args) : deniedAdminValidationResult();
+    },
+    validateSemesters(...args) {
+        return requireAdminAccess() ? validateSemesters(...args) : deniedAdminValidationResult();
+    },
+    validateCurriculumCourses(...args) {
+        return requireAdminAccess() ? validateCurriculumCourses(...args) : deniedAdminValidationResult();
+    },
+    updateArrayInStorage(...args) {
+        return requireAdminAccess()
+            ? updateArrayInStorage(...args)
+            : { success: false, message: "Admin access is unavailable. No data was changed." };
+    }
 });
 
 function getProfileCount(profileKey, role, usersState) {
@@ -1162,6 +1338,7 @@ function createStudentSemesterAllocationActions(record, rowActions, displayName)
 }
 
 function handleStudentSemesterAllocation(record, targetSemesterId, studentName, actionsElement) {
+    if (!requireAdminAccess()) return;
     const studentId = record.profile.studentId;
     if (!studentId || !targetSemesterId || studentDirectoryActionsInFlight.has(studentId)) return;
 
@@ -1350,6 +1527,7 @@ function refreshDirectoryWithAdmissionFeedback(message, state = "error") {
 }
 
 function handleStudentAdmissionDecision(studentId, expectedSnapshot, nextStatus, studentName, actionsElement) {
+    if (!requireAdminAccess()) return;
     if (nextStatus !== "admitted" && nextStatus !== "rejected") return;
     if (studentDirectoryActionsInFlight.has(studentId)) return;
 
@@ -1466,6 +1644,7 @@ function handleStudentAuthorizationDecision(
     studentName,
     actionsElement
 ) {
+    if (!requireAdminAccess()) return;
     const permittedTransitions = {
         pending: new Set(["authorized", "revoked"]),
         authorized: new Set(["revoked"]),
@@ -1610,6 +1789,7 @@ function getStudentDirectoryFilteredRecords() {
 }
 
 function renderStudentDirectoryRows() {
+    if (!requireAdminAccess()) return;
     const tbody = document.querySelector("#studentDirectoryRows");
     const resultStatus = document.querySelector("#studentDirectoryResults");
     tbody.replaceChildren();
@@ -1680,6 +1860,7 @@ function renderStudentDirectoryRows() {
 }
 
 function renderStudentDirectory() {
+    if (!requireAdminAccess()) return;
     studentDirectoryReady = false;
     studentDirectoryRecords = [];
     studentDirectoryAllocatableSemesters = [];
@@ -1819,6 +2000,7 @@ function renderStudentDirectory() {
 }
 
 function initializeStudentDirectory() {
+    if (!requireAdminAccess()) return;
     for (const selector of [
         "#studentDirectorySearch",
         "#studentAdmissionFilter",
@@ -1869,6 +2051,7 @@ function getTeacherDirectoryFilteredRecords() {
 }
 
 function renderTeacherDirectoryRows() {
+    if (!requireAdminAccess()) return;
     const tbody = document.querySelector("#teacherDirectoryRows");
     const resultStatus = document.querySelector("#teacherDirectoryResults");
     tbody.replaceChildren();
@@ -1932,12 +2115,18 @@ function renderTeacherDirectoryRows() {
 }
 
 function clearMatchingTeacherSession(userId) {
+    if (!requireAdminAccess()) {
+        return { success: false, message: "Admin access is unavailable." };
+    }
     let rawSession;
     try {
         rawSession = localStorage.getItem(SESSION_STORAGE_KEY);
         if (rawSession === null) return { success: true };
         const session = JSON.parse(rawSession);
         if (!session || session.role !== "teacher" || session.userId !== userId) return { success: true };
+        if (!requireAdminAccess()) {
+            return { success: false, message: "Admin access is unavailable. The session was left unchanged." };
+        }
         if (localStorage.getItem(SESSION_STORAGE_KEY) !== rawSession) {
             return { success: false, message: "The active session changed during the account update. Refresh and try again." };
         }
@@ -1949,6 +2138,7 @@ function clearMatchingTeacherSession(userId) {
 }
 
 function handleTeacherAccountStatusChange(record) {
+    if (!requireAdminAccess()) return;
     if (!teacherDirectoryReady || !record?.canManage) return;
     const nextStatus = record.accountStatus === "active" ? "disabled" : "active";
     const currentStatusLabel = record.accountStatus === "active" ? "Active" : "Disabled";
@@ -2023,6 +2213,7 @@ function handleTeacherAccountStatusChange(record) {
 }
 
 function renderTeacherDirectory() {
+    if (!requireAdminAccess()) return;
     teacherDirectoryReady = false;
     teacherDirectoryRecords = [];
     let usersState;
@@ -2302,6 +2493,7 @@ function renderTeacherDirectory() {
 }
 
 function initializeTeacherDirectory() {
+    if (!requireAdminAccess()) return;
     document.querySelector("#teacherDirectorySearch").addEventListener("input", renderTeacherDirectoryRows);
     document.querySelector("#teacherAccountStatusFilter").addEventListener("change", renderTeacherDirectoryRows);
     document.querySelector("#teacherProfileStateFilter").addEventListener("change", renderTeacherDirectoryRows);
@@ -2429,6 +2621,7 @@ function renderDuplicateMappingWarning(duplicateGroups, listElement) {
 }
 
 function handleDuplicateMembershipRepair(semester, duplicate) {
+    if (!requireAdminAccess()) return;
     let result;
     try {
         result = repairDuplicateSemesterMembership(
@@ -2551,6 +2744,7 @@ function setMappingActionError(message) {
 }
 
 function handleSemesterCourseAssignment(semesterSnapshot, courseId, expectedCourse, expectedSemester) {
+    if (!requireAdminAccess()) return;
     if (typeof courseId !== "string" || !courseId.trim()) {
         setMappingActionError("Choose an available curriculum course before assigning it.");
         return;
@@ -2632,6 +2826,7 @@ function handleSemesterCourseAssignment(semesterSnapshot, courseId, expectedCour
 }
 
 function handleSemesterCourseRemoval(semesterSnapshot, course, expectedSemester, expectedCourse) {
+    if (!requireAdminAccess()) return;
     const courseId = course && course.id;
     const currentData = readCurrentMappingData();
     if (!currentData.success) {
@@ -2950,6 +3145,7 @@ function setAcademicManagementControlsDisabled(disabled) {
 }
 
 function renderAcademicStructure() {
+    if (!requireAdminAccess()) return;
     setAcademicManagementControlsDisabled(false);
     const adminData = window.LearnSpaceAdminData;
     const semesterStatus = document.querySelector("#semesterViewStatus");
@@ -3118,6 +3314,7 @@ function setCourseFormMode(isEditing) {
 }
 
 function startCourseEditing(courseId) {
+    if (!requireAdminAccess()) return;
     const adminData = window.LearnSpaceAdminData;
     let snapshot;
     try {
@@ -3183,6 +3380,7 @@ function getCourseCreationStorageError(snapshot) {
 
 function handleAddCourseSubmit(event) {
     event.preventDefault();
+    if (!requireAdminAccess()) return;
 
     const form = event.currentTarget;
     const codeInput = document.querySelector("#courseCode");
@@ -3274,6 +3472,7 @@ function handleAddCourseSubmit(event) {
 }
 
 function handleEditCourseSubmit(code, name, description) {
+    if (!requireAdminAccess()) return;
     const courseId = selectedCurriculumCourseId;
     const adminData = window.LearnSpaceAdminData;
     let snapshot;
@@ -3362,6 +3561,7 @@ function handleEditCourseSubmit(code, name, description) {
 }
 
 function initializeCourseForm() {
+    if (!requireAdminAccess()) return;
     const form = document.querySelector("#addCourseForm");
     form.addEventListener("submit", handleAddCourseSubmit);
     form.addEventListener("reset", () => setCourseFormFeedback(""));
@@ -3372,6 +3572,7 @@ function initializeCourseForm() {
 }
 
 function initializeSemesterForm() {
+    if (!requireAdminAccess()) return;
     const form = document.querySelector("#addSemesterForm");
     form.addEventListener("submit", handleAddSemesterSubmit);
     form.addEventListener("reset", () => {
@@ -3442,6 +3643,7 @@ function readSemesterDataForEditing() {
 }
 
 function changeSemesterStatus(semesterId, expectedSnapshot) {
+    if (!requireAdminAccess()) return;
     const readResult = readSemesterDataForEditing();
     if (!readResult.success) {
         setSemesterFormFeedback(readResult.message, true);
@@ -3528,6 +3730,7 @@ function changeSemesterStatus(semesterId, expectedSnapshot) {
 }
 
 function startSemesterEditing(semesterId) {
+    if (!requireAdminAccess()) return;
     const result = readSemesterDataForEditing();
     if (!result.success) {
         setSemesterFormFeedback(result.message, true);
@@ -3559,6 +3762,7 @@ function cancelSemesterEditing() {
 }
 
 function handleEditSemesterSubmit(name, academicYear) {
+    if (!requireAdminAccess()) return;
     const semesterId = selectedSemesterId;
     const result = readSemesterDataForEditing();
     if (!result.success) {
@@ -3660,6 +3864,7 @@ function getSemesterCreationStorageError(snapshot) {
 
 function handleAddSemesterSubmit(event) {
     event.preventDefault();
+    if (!requireAdminAccess()) return;
 
     const form = event.currentTarget;
     const name = document.querySelector("#semesterName").value.trim();
@@ -3764,6 +3969,7 @@ function handleAddSemesterSubmit(event) {
 }
 
 function renderDashboardSummary() {
+    if (!requireAdminAccess()) return;
     const usersState = readArrayFromStorage(USER_STORAGE_KEY);
     const studentCount = getProfileCount(STUDENT_STORAGE_KEY, "student", usersState);
     const teacherCount = getProfileCount(TEACHER_STORAGE_KEY, "teacher", usersState);
@@ -3778,9 +3984,18 @@ function renderDashboardSummary() {
     );
 }
 
-renderDashboardSummary();
-renderAcademicStructure();
-initializeCourseForm();
-initializeSemesterForm();
-initializeStudentDirectory();
-initializeTeacherDirectory();
+window.addEventListener("storage", handleAdminAccessStorageChange);
+window.addEventListener("focus", requireAdminAccess);
+window.addEventListener("pageshow", requireAdminAccess);
+document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) requireAdminAccess();
+});
+
+if (requireAdminAccess()) {
+    renderDashboardSummary();
+    renderAcademicStructure();
+    initializeCourseForm();
+    initializeSemesterForm();
+    initializeStudentDirectory();
+    initializeTeacherDirectory();
+}

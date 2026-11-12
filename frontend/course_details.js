@@ -149,6 +149,55 @@ const COURSE_CONTENT_ARRAY_FIELDS = [
     "submissions"
 ];
 
+function isValidSubmissionFile(file) {
+    return Boolean(file) && typeof file === "object" && !Array.isArray(file) &&
+        typeof file.id === "string" && file.id.trim() !== "" &&
+        (file.fileName === undefined || typeof file.fileName === "string") &&
+        (file.fileType === undefined || typeof file.fileType === "string") &&
+        (file.fileData === undefined || typeof file.fileData === "string") &&
+        (file.fileSize === undefined ||
+            (Number.isFinite(file.fileSize) && file.fileSize >= 0));
+}
+
+function isValidSubmissionRecord(submission) {
+    if (!submission || typeof submission !== "object" || Array.isArray(submission) ||
+        typeof submission.assignmentId !== "string" || !submission.assignmentId.trim() ||
+        typeof submission.studentId !== "string" || !submission.studentId.trim()) {
+        return false;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(submission, "id") &&
+        (typeof submission.id !== "string" || !submission.id.trim())) return false;
+    if (Object.prototype.hasOwnProperty.call(submission, "status") &&
+        typeof submission.status !== "string") return false;
+    if (Object.prototype.hasOwnProperty.call(submission, "courseId") &&
+        (typeof submission.courseId !== "string" || !submission.courseId.trim() ||
+         submission.courseId !== courseId)) return false;
+
+    if (Object.prototype.hasOwnProperty.call(submission, "files") &&
+        (!Array.isArray(submission.files) ||
+         !submission.files.every(isValidSubmissionFile))) return false;
+
+    for (const field of ["fileName", "fileType", "fileData"]) {
+        if (Object.prototype.hasOwnProperty.call(submission, field) &&
+            typeof submission[field] !== "string") return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(submission, "fileId") &&
+        (typeof submission.fileId !== "string" || !submission.fileId.trim())) return false;
+    if (Object.prototype.hasOwnProperty.call(submission, "fileSize") &&
+        (!Number.isFinite(submission.fileSize) || submission.fileSize < 0)) return false;
+
+    const hasLegacyFileMetadata = ["fileData", "fileName", "fileType", "fileSize", "fileId"]
+        .some((field) => Object.prototype.hasOwnProperty.call(submission, field));
+    const hasFiles = Array.isArray(submission.files) && submission.files.length > 0;
+    if (hasLegacyFileMetadata && !hasFiles &&
+        (typeof submission.fileData !== "string" || !submission.fileData.trim())) {
+        return false;
+    }
+
+    return true;
+}
+
 function createEmptyCourseContent() {
     return {
         materials: [],
@@ -163,12 +212,15 @@ function isValidCourseContent(data) {
         return false;
     }
 
-    return COURSE_CONTENT_ARRAY_FIELDS.every((field) =>
-        !Object.prototype.hasOwnProperty.call(data, field) ||
-        (Array.isArray(data[field]) && data[field].every((item) =>
-            item && typeof item === "object" && !Array.isArray(item)
-        ))
-    );
+    return COURSE_CONTENT_ARRAY_FIELDS.every((field) => {
+        if (!Object.prototype.hasOwnProperty.call(data, field)) return true;
+        if (!Array.isArray(data[field])) return false;
+        return field === "submissions"
+            ? data[field].every(isValidSubmissionRecord)
+            : data[field].every((item) =>
+                item && typeof item === "object" && !Array.isArray(item)
+            );
+    });
 }
 
 function reportInvalidCourseContent() {
@@ -523,6 +575,7 @@ function getOwnedSubmissionMatches(submissions, assignmentId, studentId) {
     return submissions.filter((item) =>
         item.assignmentId === assignmentId &&
         item.studentId === studentId &&
+        (item.courseId === undefined || item.courseId === courseId) &&
         isUsableStudentId(item.studentId)
     );
 }
