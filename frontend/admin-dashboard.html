@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#F1F2EB">
+    <title>LearnSpace | Admin Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="admin-dashboard.css">
+    <script src="admin-dashboard.js" defer></script>
+</head>
+<body class="admin-page">
+    <a class="skip-link" href="#mainContent">Skip to main content</a>
+
+    <header class="admin-topbar">
+        <a class="brand" href="index.html" aria-label="LearnSpace home">
+            <span class="brand-icon" aria-hidden="true">L</span>
+            <span>
+                <span class="brand-name">learnspace</span>
+                <span class="brand-tagline">A place to grow</span>
+            </span>
+        </a>
+
+        <div class="admin-topbar-right">
+            <span class="demo-label">Admin demo</span>
+            <a class="home-link" href="index.html">Return to home</a>
+        </div>
+    </header>
+
+    <div class="admin-layout">
+        <aside class="admin-sidebar" aria-label="Dashboard sidebar">
+            <p class="sidebar-label">ADMINISTRATION</p>
+            <nav class="admin-navigation" aria-label="Admin dashboard">
+                <a href="#overview">Overview</a>
+                <a href="#students">Students</a>
+                <a href="#teachers">Teachers</a>
+                <a href="#semesters">Semesters</a>
+                <a href="#curriculum">Curriculum</a>
+            </nav>
+            <p class="sidebar-note">
+                Manage student and teacher records, semesters, and curriculum for this demo.
+            </p>
+        </aside>
+
+        <main class="admin-main" id="mainContent" tabindex="-1">
+            <section class="admin-overview" id="overview" aria-labelledby="overviewTitle">
+                <p class="eyebrow">ADMIN DASHBOARD</p>
+                <h1 id="overviewTitle">A clear view of your learning community.</h1>
+                <p class="overview-intro">
+                    Review demo data and manage student, teacher, semester, and curriculum records.
+                </p>
+
+                <p class="session-indicator" id="sessionIndicator"
+                   role="status" aria-live="polite">
+                    Checking demo session…
+                </p>
+                <p class="demo-disclaimer">
+                    This is a localStorage demo. Admin access is checked against the current session and active account; this is not secure authentication.
+                </p>
+
+                <div class="overview-grid" role="group" aria-label="Current data summary">
+                    <article class="overview-card overview-card-students">
+                        <p class="card-kicker">STUDENT PROFILES</p>
+                        <p class="card-value" id="studentProfileCount" aria-live="polite">
+                            Loading…
+                        </p>
+                        <p class="card-caption">
+                            Saved student profiles with valid required fields and
+                            user links.
+                        </p>
+                    </article>
+                    <article class="overview-card overview-card-teachers">
+                        <p class="card-kicker">TEACHER PROFILES</p>
+                        <p class="card-value" id="teacherProfileCount" aria-live="polite">
+                            Loading…
+                        </p>
+                        <p class="card-caption">
+                            Saved teacher profiles with valid required fields and
+                            user links.
+                        </p>
+                    </article>
+                    <article class="overview-card overview-card-muted">
+                        <p class="card-kicker">SEMESTERS</p>
+                        <p class="card-value card-value-label" id="semesterSummaryCount"
+                           aria-live="polite">Loading…</p>
+                        <p class="card-caption">Validated semesters in this demo.</p>
+                    </article>
+                    <article class="overview-card overview-card-muted">
+                        <p class="card-kicker">CURRICULUM</p>
+                        <p class="card-value card-value-label">Not configured</p>
+                        <p class="card-caption">
+                            Official curriculum management is planned for a later phase.
+                        </p>
+                    </article>
+                </div>
+            </section>
+
+            <section class="management-section" id="students" aria-labelledby="studentsTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">PEOPLE</p>
+                    <h2 id="studentsTitle">Student management</h2>
+                </div>
+                <div class="student-directory-panel">
+                    <p class="data-state" id="studentDirectoryStatus" role="status"
+                       aria-live="polite">Loading Student directory…</p>
+
+                    <div class="student-summary-grid" role="group"
+                         aria-label="Student profile summary">
+                        <article class="overview-card overview-card-students">
+                            <p class="card-kicker">REGISTERED STUDENT PROFILES</p>
+                            <p class="card-value card-value-label" id="directoryTotalCount"
+                               aria-live="polite">Loading…</p>
+                            <p class="card-caption">Validated Student profiles linked to accounts.</p>
+                        </article>
+                        <article class="overview-card overview-card-teachers">
+                            <p class="card-kicker">ADMITTED</p>
+                            <p class="card-value card-value-label" id="directoryAdmittedCount"
+                               aria-live="polite">Loading…</p>
+                            <p class="card-caption">Profiles with admitted status.</p>
+                        </article>
+                        <article class="overview-card overview-card-muted">
+                            <p class="card-kicker">PENDING ADMISSIONS</p>
+                            <p class="card-value card-value-label" id="directoryPendingCount"
+                               aria-live="polite">Loading…</p>
+                            <p class="card-caption">Profiles awaiting an admission decision.</p>
+                        </article>
+                    </div>
+
+                    <div class="student-directory-controls" aria-label="Student directory filters">
+                        <div class="form-field student-directory-search">
+                            <label for="studentDirectorySearch">Search by student name or email</label>
+                            <input id="studentDirectorySearch" type="search"
+                                   autocomplete="off" placeholder="Search students">
+                        </div>
+                        <div class="form-field">
+                            <label for="studentAdmissionFilter">Admission status</label>
+                            <select id="studentAdmissionFilter">
+                                <option value="">All admission statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="admitted">Admitted</option>
+                                <option value="rejected">Rejected</option>
+                                <option value="missing-profile">No profile</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="studentAuthorizationFilter">Authorization status</label>
+                            <select id="studentAuthorizationFilter">
+                                <option value="">All authorization statuses</option>
+                                <option value="pending">Pending</option>
+                                <option value="authorized">Authorized</option>
+                                <option value="revoked">Revoked</option>
+                                <option value="missing-profile">No profile</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="studentSemesterFilter">Semester</label>
+                            <select id="studentSemesterFilter">
+                                <option value="">All semesters</option>
+                            </select>
+                        </div>
+                        <button class="course-reset-button student-filter-reset" id="resetStudentFilters"
+                                type="button">Clear filters</button>
+                    </div>
+
+                    <p class="directory-result-status" id="studentDirectoryResults"
+                       role="status" aria-live="polite"></p>
+                    <p class="directory-result-status">
+                        Changing a semester allocation replaces the current semester. Historical semester allocations are not tracked.
+                    </p>
+                    <div class="student-directory-table-wrap">
+                        <table class="student-directory-table">
+                            <caption class="student-directory-caption">Student accounts and academic profiles</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Student</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Account</th>
+                                    <th scope="col">Admission</th>
+                                    <th scope="col">Authorization</th>
+                                    <th scope="col">Semester</th>
+                                    <th scope="col">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="studentDirectoryRows"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="management-section" id="teachers" aria-labelledby="teachersTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">PEOPLE</p>
+                    <h2 id="teachersTitle">Teacher management</h2>
+                </div>
+                <div class="student-directory-panel">
+                    <p class="data-state" id="teacherDirectoryStatus" role="status"
+                       aria-live="polite">Loading Teacher directory…</p>
+
+                    <div class="student-directory-controls" aria-label="Teacher directory search and filters">
+                        <div class="form-field student-directory-search">
+                            <label for="teacherDirectorySearch">Search by name, email, or Teacher ID</label>
+                            <input id="teacherDirectorySearch" type="search"
+                                   autocomplete="off" placeholder="Search Teachers">
+                        </div>
+                        <div class="form-field">
+                            <label for="teacherAccountStatusFilter">Account status</label>
+                            <select id="teacherAccountStatusFilter">
+                                <option value="">All account statuses</option>
+                                <option value="active">Active</option>
+                                <option value="disabled">Disabled</option>
+                                <option value="pending">Pending</option>
+                                <option value="invalid">Invalid account data</option>
+                            </select>
+                        </div>
+                        <div class="form-field">
+                            <label for="teacherProfileStateFilter">Profile state</label>
+                            <select id="teacherProfileStateFilter">
+                                <option value="">All profile states</option>
+                                <option value="valid">Valid profile</option>
+                                <option value="missing">Missing profile</option>
+                                <option value="invalid">Invalid profile</option>
+                            </select>
+                        </div>
+                        <button class="course-reset-button student-filter-reset" id="resetTeacherFilters"
+                                type="button">Clear filters</button>
+                    </div>
+
+                    <p class="directory-result-status" id="teacherDirectoryResults"
+                       role="status" aria-live="polite"></p>
+                    <div class="student-directory-table-wrap">
+                        <table class="student-directory-table">
+                            <caption class="student-directory-caption">Teacher accounts and linked profiles; status changes are available for validated records</caption>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Teacher</th>
+                                    <th scope="col">Email</th>
+                                    <th scope="col">Account status</th>
+                                    <th scope="col">Teacher ID</th>
+                                    <th scope="col">Profile created</th>
+                                    <th scope="col">Profile state</th>
+                                    <th scope="col">Account action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="teacherDirectoryRows"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <section class="management-section" id="semesters" aria-labelledby="semestersTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">ACADEMIC STRUCTURE</p>
+                    <h2 id="semestersTitle">Semesters</h2>
+                </div>
+                <div class="academic-data-panel">
+                    <p class="data-state" id="semesterViewStatus" role="status"
+                       aria-live="polite">Loading semester data…</p>
+                    <form class="course-form-panel semester-form-panel" id="addSemesterForm"
+                          aria-labelledby="semesterFormTitle">
+                        <div class="course-form-heading">
+                            <p class="eyebrow">SEMESTER SETUP</p>
+                            <h3 id="semesterFormTitle">Add a semester</h3>
+                            <p>Semester course membership will be managed separately.</p>
+                        </div>
+
+                        <div class="course-form-fields">
+                            <div class="form-field">
+                                <label for="semesterName">Semester name <span>(required)</span></label>
+                                <input id="semesterName" name="name" type="text" required>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="semesterAcademicYear">Academic year <span>(required)</span></label>
+                                <input id="semesterAcademicYear" name="academicYear" type="text" required>
+                            </div>
+                        </div>
+
+                        <div class="course-form-actions">
+                            <button class="course-submit-button" id="addSemesterSubmitButton"
+                                    type="submit">Add Semester</button>
+                            <button class="course-reset-button" id="addSemesterResetButton"
+                                    type="reset">Clear Fields</button>
+                            <button class="course-cancel-button" id="cancelSemesterEditButton"
+                                    type="button" hidden>Cancel Editing</button>
+                        </div>
+                        <p class="form-feedback" id="semesterFormStatus" role="status"
+                           aria-live="polite"></p>
+                    </form>
+                    <div class="record-list" id="semesterList"></div>
+                </div>
+            </section>
+
+            <section class="management-section" id="curriculum" aria-labelledby="curriculumTitle">
+                <div class="section-heading">
+                    <p class="eyebrow">ACADEMIC STRUCTURE</p>
+                    <h2 id="curriculumTitle">Curriculum</h2>
+                </div>
+                <div class="academic-data-panel">
+                    <p class="data-state" id="curriculumViewStatus" role="status"
+                       aria-live="polite">Loading curriculum data…</p>
+                    <form class="course-form-panel" id="addCourseForm"
+                          aria-labelledby="courseFormTitle">
+                        <div class="course-form-heading">
+                            <p class="eyebrow">CURRICULUM SETUP</p>
+                            <h3 id="courseFormTitle">Add an official course</h3>
+                            <p>These are curriculum courses. Teacher course offerings remain separate.</p>
+                        </div>
+
+                        <div class="course-form-fields">
+                            <div class="form-field">
+                                <label for="courseCode">Course code <span>(required)</span></label>
+                                <input id="courseCode" name="code" type="text"
+                                       autocomplete="off" required
+                                       aria-describedby="courseCodeHint">
+                                <small id="courseCodeHint">Course codes must be unique.</small>
+                            </div>
+
+                            <div class="form-field">
+                                <label for="courseName">Course name <span>(required)</span></label>
+                                <input id="courseName" name="name" type="text" required>
+                            </div>
+
+                            <div class="form-field form-field-wide">
+                                <label for="courseDescription">Description <span>(optional)</span></label>
+                                <textarea id="courseDescription" name="description" rows="3"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="course-form-actions">
+                            <button class="course-submit-button" id="courseSubmitButton"
+                                    type="submit">Add Course</button>
+                            <button class="course-reset-button" id="courseResetButton"
+                                    type="reset">Clear fields</button>
+                            <button class="course-cancel-button" id="cancelCourseEditButton"
+                                    type="button" hidden>Cancel Editing</button>
+                        </div>
+                        <p class="form-feedback" id="courseFormStatus" role="status"
+                           aria-live="polite"></p>
+                    </form>
+                    <div class="record-list" id="curriculumList"></div>
+                </div>
+            </section>
+
+            <footer class="admin-footer">
+                <span>LEARN SOMETHING NEW, EVERY DAY.</span>
+                <span>MADE FOR CURIOUS MINDS ✳</span>
+            </footer>
+        </main>
+    </div>
+</body>
+</html>
