@@ -32,12 +32,21 @@ function openLogin(role, card) {
         : "";
     loginPanel.hidden = false;
     backdrop.hidden = false;
+   
+    loginPanel.hidden = false;
+    backdrop.hidden = false;
+    loginPanel.classList.add("is-visible");
+    backdrop.classList.add("is-visible");
+
     document.body.classList.add("login-open");
     roleCards.forEach((item) => item.setAttribute("aria-pressed", String(item === card)));
     emailInput.focus();
 }
 
 function closeLogin() {
+    loginPanel.classList.remove("is-visible");
+    backdrop.classList.remove("is-visible");
+
     loginPanel.hidden = true;
     backdrop.hidden = true;
     document.body.classList.remove("login-open");
