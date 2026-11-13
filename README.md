@@ -177,57 +177,6 @@ The endpoint list is transcribed from `backend/src/routes/`; it describes route 
 
 These are implemented application controls; they do not establish that the application has been deployed or certified for production use.
 
-## Project Setup and Installation
-
-### Prerequisites
-
-- Node.js and npm.
-- MySQL Server 8.x and access to the existing, owner-provisioned LearnSpace database.
-- MySQL Workbench is optional as a database client; it does not replace the MySQL Server.
-- Python (or another static HTTP server) to serve the frontend pages locally.
-
-### Install and configure
-
-From the repository root, use PowerShell:
-
-~~~powershell
-cd .\backend
-npm ci
-Copy-Item .env.example .env
-notepad .env
-~~~
-
-Set local `DB_HOST`, `DB_PORT`, `DB_USER` and `DB_PASSWORD` in `.env`. Review the other settings in `backend/.env.example`, including the database name, server host/port, allowed frontend origins and private local file-storage path. Never commit `.env` or use production credentials for development or testing.
-
-**Database prerequisite:** the backend connects to an existing database; this repository does not include a checked-in schema DDL or migration baseline. Obtain the approved schema or a provisioned development database from the project owner before starting the API. Do not create tables based only on this README.
-
-If the configured database has no Admin account, create its first Admin once from an interactive terminal in the `backend` directory:
-
-~~~powershell
-npm run bootstrap:admin
-~~~
-
-The script prompts for a display name, email, password and confirmation; password input is not echoed. It refuses to create another Admin when one already exists.
-
-### Start the backend and frontend
-
-In the first PowerShell terminal, from `backend`:
-
-~~~powershell
-npm run dev
-~~~
-
-To use the frontend locally, open a second terminal at the repository root:
-
-~~~powershell
-cd .\frontend
-python -m http.server 5500
-~~~
-
-Open `http://127.0.0.1:5500/index.html`. The default backend health URLs are `http://127.0.0.1:5000/api/health` and `http://127.0.0.1:5000/api/health/db` when using the example host and port settings.
-
-The backend test commands, run from `backend`, are `npm test` and `npm run test:browser`. The tests require MySQL access; follow the test harness configuration and use an isolated development/test database account.
-
 ## Project Structure
 
 ~~~text
@@ -250,7 +199,3 @@ project-lms/
 │   └── tests/                # Node integration tests and Playwright browser workflow
 └── .gitignore
 ~~~
-
-## Conclusion
-
-LearnSpace provides an Express and MySQL backend for role-based authentication, Admin academic management, Teacher course workflows and Student learning workflows through its API-connected frontend.
