@@ -2,13 +2,14 @@ const db = require("../config/db");
 const transaction = require("../utils/transaction");
 const ApiError = require("../utils/ApiError");
 const { requireUuid } = require("../utils/validation");
-const { queueUnreferencedFiles, drainCleanupJobs } = require("./file-cleanup.service");
+const { queueUnreferencedFiles, drainCleanupJobs, pendingAssetCleanupCount } = require("./file-cleanup.service");
 const { offeringFileIds } = require("./academic.service");
 
 async function finish(fileIds) {
-    const queued = await transaction((connection) => queueUnreferencedFiles(connection, fileIds));
-    const outcomes = await drainCleanupJobs(queued);
-    if (outcomes.some((item) => !item.complete)) {
+    await transaction((connection) => queueUnreferencedFiles(connection, fileIds));
+    const outcomes = await drainCleanupJobs(fileIds);
+    const pendingCount = await pendingAssetCleanupCount(fileIds);
+    if (outcomes.some((item) => !item.complete) || pendingCount > 0) {
         throw new ApiError(503, "FILE_CLEANUP_PENDING", "Database deletion is complete, but private file cleanup is still pending. The cleanup worker will retry.");
     }
 }

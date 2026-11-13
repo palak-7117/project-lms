@@ -1,6 +1,6 @@
 const db = require("../config/db");
 const transaction = require("../utils/transaction");
-const localStorage = require("../storage/local");
+const storage = require("../storage");
 
 async function queueUnreferencedFiles(connection, assetIds) {
     const queued = [];
@@ -34,13 +34,15 @@ async function claimJob(jobId = null) {
     return transaction(async (connection) => {
         const [rows] = await connection.execute(
             `SELECT id,file_asset_id AS assetId,storage_provider AS provider,storage_key AS storageKey,attempt_count AS attemptCount
-             FROM file_cleanup_jobs WHERE status IN ('queued','failed') AND next_attempt_at<=CURRENT_TIMESTAMP(3)
+             FROM file_cleanup_jobs WHERE (status IN ('queued','failed') OR
+               (status='processing' AND updated_at<DATE_SUB(CURRENT_TIMESTAMP(3),INTERVAL 5 MINUTE)))
+               AND next_attempt_at<=CURRENT_TIMESTAMP(3)
                AND (? IS NULL OR id=?) ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED`,
             [jobId, jobId]
         );
         const job = rows[0];
         if (!job) return null;
-        if (job.provider !== localStorage.provider || !job.storageKey) {
+        if (job.provider !== storage.provider || !job.storageKey) {
             await connection.execute(
                 "UPDATE file_cleanup_jobs SET status='failed',attempt_count=attempt_count+1,last_error='Unsupported storage provider or missing key',next_attempt_at=DATE_ADD(CURRENT_TIMESTAMP(3),INTERVAL 1 MINUTE) WHERE id=?",
                 [job.id]
@@ -81,8 +83,8 @@ async function claimJob(jobId = null) {
 async function processJob(job) {
     if (job.unavailable) return { complete: false, jobId: job.id };
     try {
-        if (job.provider !== localStorage.provider) throw new Error("Unsupported storage provider.");
-        await localStorage.remove(job.storageKey);
+        if (job.provider !== storage.provider) throw new Error("Unsupported storage provider.");
+        await storage.remove(job.storageKey);
         await transaction(async (connection) => {
             await connection.execute("DELETE FROM file_assets WHERE id=? AND status='pending_delete'", [job.assetId]);
             await connection.execute(
@@ -122,4 +124,14 @@ async function drainCleanupJobs(assetIds = null) {
     return output;
 }
 
-module.exports = { queueUnreferencedFiles, drainCleanupJobs };
+async function pendingAssetCleanupCount(assetIds) {
+    if (!assetIds?.length) return 0;
+    const placeholders = assetIds.map(() => "?").join(",");
+    const [rows] = await db.execute(
+        `SELECT COUNT(*) AS total FROM file_assets WHERE status='pending_delete' AND id IN (${placeholders})`,
+        assetIds
+    );
+    return Number(rows[0].total);
+}
+
+module.exports = { queueUnreferencedFiles, drainCleanupJobs, pendingAssetCleanupCount };

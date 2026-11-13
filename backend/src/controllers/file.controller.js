@@ -11,7 +11,7 @@ module.exports = async function download(req, res, next) {
             "Cache-Control": "private, no-store",
             "X-Content-Type-Options": "nosniff"
         });
-        file.stream.on("error", next);
+        file.stream.on("error", (error) => { void file.release(); next(error); });
         file.stream.pipe(res);
     } catch (error) { next(error); }
 };

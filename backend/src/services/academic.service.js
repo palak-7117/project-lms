@@ -4,8 +4,8 @@ const db = require("../config/db");
 const transaction = require("../utils/transaction");
 const ApiError = require("../utils/ApiError");
 const { requireString, requireUuid, requireEnum } = require("../utils/validation");
-const storage = require("../storage/local");
-const { queueUnreferencedFiles, drainCleanupJobs } = require("./file-cleanup.service");
+const storage = require("../storage");
+const { queueUnreferencedFiles, drainCleanupJobs, pendingAssetCleanupCount } = require("./file-cleanup.service");
 
 const types = {
     ".pdf": "application/pdf", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -94,8 +94,8 @@ async function createAsset(connection, file, userId) {
         const sha256 = crypto.createHash("sha256").update(file.buffer).digest("hex");
         await connection.execute(
             `INSERT INTO file_assets (id,storage_provider,storage_key,original_filename,content_type,size_bytes,sha256,uploaded_by_user_id,status)
-             VALUES (?,'local',?,?,?,?,?,?,'available')`,
-            [id, key, path.basename(file.originalname || "file").replace(/[\r\n\0]/g, "_").slice(0, 255), contentType, file.size, sha256, userId]
+             VALUES (?,?,?,?,?,?,?,?, 'available')`,
+            [id, storage.provider, key, String(file.originalname || "file").split(/[\\/]/).pop().replace(/[\r\n\0]/g, "_").slice(0, 255), contentType, file.size, sha256, userId]
         );
     } catch (error) {
         await storage.remove(key).catch(() => {});
@@ -220,9 +220,10 @@ async function deleteOfferingInTransaction(connection, offeringId) {
 }
 
 async function finishDeletion(fileIds) {
-    const cleanupIds = await transaction((connection) => queueUnreferencedFiles(connection, fileIds));
-    const results = await drainCleanupJobs(cleanupIds);
-    if (results.some((result) => !result.complete)) {
+    await transaction((connection) => queueUnreferencedFiles(connection, fileIds));
+    const results = await drainCleanupJobs(fileIds);
+    const pendingCount = await pendingAssetCleanupCount(fileIds);
+    if (results.some((result) => !result.complete) || pendingCount > 0) {
         throw new ApiError(503, "FILE_CLEANUP_PENDING", "Database deletion is complete, but private file cleanup is still pending. The cleanup worker will retry.");
     }
 }
@@ -275,6 +276,8 @@ async function updateMaterial(teacherProfileId, materialId, body) {
         const description = body?.description === undefined ? current.description : requireString(body.description, "Description", 20000, { optional: true }) || "";
         const type = body?.materialType === undefined ? current.materialType : requireEnum(body.materialType, "Material type", ["book", "notes", "resource"]);
         const url = body?.externalUrl === undefined ? current.externalUrl : safeExternalUrl(body.externalUrl || null);
+        const [assetRows] = await connection.execute("SELECT file_asset_id AS fileAssetId FROM materials WHERE id=?", [id]);
+        if (!url && !assetRows[0]?.fileAssetId) bad("A material must retain a file or an external resource link.");
         await connection.execute("UPDATE materials SET title=?,material_type=?,description=?,external_url=? WHERE id=?", [title, type, description, url, id]);
         return { ...current, title, description, materialType: type, externalUrl: url };
     });
@@ -330,6 +333,12 @@ async function updateAssignment(teacherProfileId, assignmentId, body) {
         const title = body?.title === undefined ? row.title : requireString(body.title, "Title", 200);
         const description = body?.description === undefined ? row.description : requireString(body.description, "Description", 20000, { optional: true }) || "";
         const marks = body?.marks === undefined ? row.marks : positiveMarks(body.marks);
+        if (marks != null) {
+            const [[topGrade]] = await connection.execute("SELECT MAX(grade) AS maximumGrade FROM assignment_submissions WHERE assignment_id=?", [id]);
+            if (topGrade.maximumGrade != null && Number(topGrade.maximumGrade) > Number(marks)) {
+                bad("Maximum marks cannot be lower than a grade already returned.", "MAXIMUM_MARKS_CONFLICT", 409);
+            }
+        }
         const status = body?.status === undefined ? row.status : requireEnum(body.status, "Status", ["draft", "published", "closed"]);
         await connection.execute("UPDATE assignments SET title=?,description=?,start_at=?,due_at=?,marks=?,status=? WHERE id=?", [title, description, startAt, dueAt, marks, status, id]);
         return { id, offeringId: row.offering_id, title, description, startAt, dueAt, marks, status };
@@ -357,13 +366,13 @@ async function deleteAssignment(teacherProfileId, assignmentId) {
 
 async function listSubmissions(teacherProfileId, assignmentId) {
     const id = requireUuid(assignmentId, "Assignment ID");
-    const [owner] = await db.execute("SELECT id FROM assignments a JOIN offerings o ON o.id=a.offering_id WHERE a.id=? AND o.teacher_profile_id=?", [id, teacherProfileId]);
+    const [owner] = await db.execute("SELECT a.id FROM assignments a JOIN offerings o ON o.id=a.offering_id WHERE a.id=? AND o.teacher_profile_id=?", [id, teacherProfileId]);
     if (!owner[0]) throw new ApiError(404, "ASSIGNMENT_NOT_FOUND", "Assignment not found.");
     const [rows] = await db.execute(
         `SELECT s.id,s.student_profile_id AS studentProfileId,u.display_name AS studentName,u.email,s.status,s.submitted_at AS submittedAt,
                 s.grade,s.feedback,s.graded_at AS gradedAt
          FROM assignment_submissions s JOIN student_profiles sp ON sp.id=s.student_profile_id JOIN users u ON u.id=sp.user_id
-         WHERE s.assignment_id=? ORDER BY s.submitted_at`, [id]
+         WHERE s.assignment_id=? AND s.status<>'draft' ORDER BY s.submitted_at`, [id]
     );
     for (const row of rows) {
         const [files] = await db.execute(
@@ -554,7 +563,7 @@ async function getStudentOffering(studentProfileId, offeringId) {
          FROM quizzes WHERE offering_id=? AND status='published' ORDER BY start_at`, [id]
     );
     const [attendance] = await db.execute(
-        `SELECT ats.id,ats.title,ats.starts_at AS startsAt,ats.status,ar.attendance_status AS attendanceStatus
+        `SELECT ats.id,ats.title,ats.starts_at AS startsAt,ats.status,ar.attendance_status AS attendanceStatus,ar.note
          FROM attendance_sessions ats LEFT JOIN attendance_records ar ON ar.attendance_session_id=ats.id AND ar.student_profile_id=?
          WHERE ats.offering_id=? AND ats.status='held' ORDER BY ats.starts_at DESC`, [studentProfileId, id]
     );
@@ -567,22 +576,23 @@ async function getStudentOffering(studentProfileId, offeringId) {
     return { offering, materials, assignments, quizzes, attendance: { sessions: attendance, summary } };
 }
 
-async function submitAssignment(studentProfileId, offeringId, assignmentId, files) {
+async function submitAssignment(studentProfileId, offeringId, assignmentId, files, requestedStatus = "submitted") {
     const offering = requireUuid(offeringId, "Offering ID");
     const assignment = requireUuid(assignmentId, "Assignment ID");
-    if (!files?.length) bad("Attach at least one submission file.");
-    if (files.length > 5) bad("A submission can include at most five files.");
+    const status = requireEnum(requestedStatus || "submitted", "Submission status", ["draft", "submitted"]);
+    if ((files?.length || 0) > 5) bad("A submission can include at most five files.");
     const created = [];
     try {
         const result = await transaction(async (connection) => {
             await eligibleStudentOffering(connection, studentProfileId, offering, true);
             const [rows] = await connection.execute(
-                `SELECT id,title,status,start_at AS startAt,due_at AS dueAt,CURRENT_TIMESTAMP(3) AS now FROM assignments
+                `SELECT id,title,status,start_at AS startAt,due_at AS dueAt,CURRENT_TIMESTAMP(3) AS now,
+                        (CURRENT_TIMESTAMP(3) BETWEEN start_at AND due_at) AS inWindow FROM assignments
                  WHERE id=? AND offering_id=? FOR UPDATE`, [assignment, offering]
             );
             const assignmentRow = rows[0];
             if (!assignmentRow || assignmentRow.status !== "published") throw new ApiError(404, "ASSIGNMENT_NOT_FOUND", "Assignment is unavailable.");
-            if (new Date(assignmentRow.now) < new Date(assignmentRow.startAt) || new Date(assignmentRow.now) > new Date(assignmentRow.dueAt)) {
+            if (!Number(assignmentRow.inWindow)) {
                 bad("This assignment is outside its submission window.", "SUBMISSION_WINDOW_CLOSED", 409);
             }
             const [existingRows] = await connection.execute(
@@ -590,19 +600,21 @@ async function submitAssignment(studentProfileId, offeringId, assignmentId, file
             );
             const existing = existingRows[0];
             if (existing && existing.status !== "draft") bad("A submission has already been recorded for this assignment.", "DUPLICATE_SUBMISSION", 409);
+            const [[existingFiles]] = await connection.execute("SELECT COUNT(*) AS total FROM submission_files WHERE submission_id=?", [existing?.id || "00000000-0000-4000-8000-000000000000"]);
+            if (!files?.length && (!existing || Number(existingFiles.total) === 0)) bad("Attach at least one submission file.");
             let submissionId = existing?.id;
             if (!submissionId) {
                 submissionId = crypto.randomUUID();
-                await connection.execute("INSERT INTO assignment_submissions (id,assignment_id,student_profile_id,status,submitted_at) VALUES (?,?,?,'submitted',CURRENT_TIMESTAMP(3))", [submissionId, assignment, studentProfileId]);
+                await connection.execute("INSERT INTO assignment_submissions (id,assignment_id,student_profile_id,status,submitted_at) VALUES (?,?,?,?,IF(?='submitted',CURRENT_TIMESTAMP(3),NULL))", [submissionId, assignment, studentProfileId, status, status]);
             } else {
-                await connection.execute("UPDATE assignment_submissions SET status='submitted',submitted_at=CURRENT_TIMESTAMP(3) WHERE id=?", [submissionId]);
+                await connection.execute("UPDATE assignment_submissions SET status=?,submitted_at=IF(?='submitted',CURRENT_TIMESTAMP(3),NULL) WHERE id=?", [status, status, submissionId]);
             }
             for (const file of files) {
                 const asset = await createAsset(connection, file, null);
                 created.push(asset);
                 await connection.execute("INSERT INTO submission_files (id,submission_id,file_asset_id) VALUES (?,?,?)", [crypto.randomUUID(), submissionId, asset.id]);
             }
-            return { id: submissionId, assignmentId: assignment, status: "submitted", submittedAt: assignmentRow.now, files: created.map(({ id, size }, index) => ({ fileAssetId: id, filename: files[index]?.originalname, size })) };
+            return { id: submissionId, assignmentId: assignment, status, submittedAt: status === "submitted" ? assignmentRow.now : null, files: created.map(({ id, size }, index) => ({ fileAssetId: id, filename: files[index]?.originalname, size })) };
         });
         return result;
     } catch (error) { await removeNewAssets(created); throw error; }
@@ -641,30 +653,53 @@ async function getStudentAttendance(studentProfileId, offeringId) {
 
 async function getFileForUser(user, assetId) {
     const id = requireUuid(assetId, "File ID");
-    const [rows] = await db.execute("SELECT id,storage_provider AS provider,storage_key AS storageKey,original_filename AS filename,content_type AS contentType,size_bytes AS sizeBytes,status FROM file_assets WHERE id=? AND status='available'", [id]);
-    const file = rows[0];
-    if (!file) throw new ApiError(404, "FILE_NOT_FOUND", "File not found.");
-    let [allowed] = await db.execute(
-        `SELECT 1 AS allowed FROM materials m JOIN offerings o ON o.id=m.offering_id
-         WHERE m.file_asset_id=? AND ${user.role === "teacher" ? "o.teacher_profile_id=?" : "o.id IN (SELECT o2.id FROM offerings o2 JOIN student_profiles sp ON sp.current_semester_id=o2.semester_id WHERE sp.id=? AND sp.admission_status='admitted' AND sp.authorization_status='authorized' AND o2.status='active')"}
-         LIMIT 1`, [id, user.role === "teacher" ? user.teacherProfileId : user.studentProfileId]
-    );
-    if (!allowed[0] && user.role === "teacher") {
-        [allowed] = await db.execute(
-            `SELECT 1 AS allowed FROM submission_files sf JOIN assignment_submissions s ON s.id=sf.submission_id
-             JOIN assignments a ON a.id=s.assignment_id JOIN offerings o ON o.id=a.offering_id
-             WHERE sf.file_asset_id=? AND o.teacher_profile_id=? LIMIT 1`, [id, user.teacherProfileId]
+    const connection = await db.getConnection();
+    let transactionStarted = false;
+    try {
+        await connection.beginTransaction();
+        transactionStarted = true;
+        const [rows] = await connection.execute(
+            "SELECT id,storage_provider AS provider,storage_key AS storageKey,original_filename AS filename,content_type AS contentType,size_bytes AS sizeBytes,status FROM file_assets WHERE id=? AND status='available' FOR SHARE",
+            [id]
         );
-    } else if (!allowed[0] && user.role === "student") {
-        [allowed] = await db.execute(
-            `SELECT 1 AS allowed FROM submission_files sf JOIN assignment_submissions s ON s.id=sf.submission_id
-             WHERE sf.file_asset_id=? AND s.student_profile_id=? LIMIT 1`, [id, user.studentProfileId]
+        const file = rows[0];
+        if (!file) throw new ApiError(404, "FILE_NOT_FOUND", "File not found.");
+        let [allowed] = await connection.execute(
+            `SELECT 1 AS allowed FROM materials m JOIN offerings o ON o.id=m.offering_id
+             WHERE m.file_asset_id=? AND ${user.role === "teacher" ? "o.teacher_profile_id=?" : "o.id IN (SELECT o2.id FROM offerings o2 JOIN semesters os ON os.id=o2.semester_id JOIN curriculum_subjects oc ON oc.id=o2.curriculum_subject_id JOIN student_profiles sp ON sp.current_semester_id=o2.semester_id JOIN users su ON su.id=sp.user_id WHERE sp.id=? AND sp.admission_status='admitted' AND sp.authorization_status='authorized' AND su.account_status='active' AND os.status='active' AND oc.status='active' AND o2.status='active')"}
+             LIMIT 1`, [id, user.role === "teacher" ? user.teacherProfileId : user.studentProfileId]
         );
+        if (!allowed[0] && user.role === "teacher") {
+            [allowed] = await connection.execute(
+                `SELECT 1 AS allowed FROM submission_files sf JOIN assignment_submissions s ON s.id=sf.submission_id
+                 JOIN assignments a ON a.id=s.assignment_id JOIN offerings o ON o.id=a.offering_id
+                 WHERE sf.file_asset_id=? AND o.teacher_profile_id=? LIMIT 1`, [id, user.teacherProfileId]
+            );
+        } else if (!allowed[0] && user.role === "student") {
+            [allowed] = await connection.execute(
+                `SELECT 1 AS allowed FROM submission_files sf JOIN assignment_submissions s ON s.id=sf.submission_id
+                 WHERE sf.file_asset_id=? AND s.student_profile_id=? LIMIT 1`, [id, user.studentProfileId]
+            );
+        }
+        if (!allowed[0]) throw new ApiError(403, "FILE_ACCESS_DENIED", "You do not have access to this file.");
+        if (file.provider !== storage.provider) throw new ApiError(503, "FILE_STORAGE_UNAVAILABLE", "File storage is unavailable.");
+        const opened = await storage.open(file.storageKey);
+        let released = false;
+        const release = async () => {
+            if (released) return;
+            released = true;
+            try { await connection.commit(); }
+            finally { connection.release(); }
+        };
+        opened.stream.once("close", () => { void release(); });
+        return { ...file, ...opened, release };
+    } catch (error) {
+        if (transactionStarted) {
+            try { await connection.rollback(); } catch {}
+        }
+        connection.release();
+        throw error;
     }
-    if (!allowed[0]) throw new ApiError(403, "FILE_ACCESS_DENIED", "You do not have access to this file.");
-    if (file.provider !== storage.provider) throw new ApiError(503, "FILE_STORAGE_UNAVAILABLE", "File storage is unavailable.");
-    const opened = await storage.open(file.storageKey);
-    return { ...file, ...opened };
 }
 
 async function listCurrentSemesterEligibleStudents(teacherProfileId, offeringId) {

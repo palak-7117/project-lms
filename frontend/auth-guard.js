@@ -35,7 +35,7 @@
             }
             window.LearnSpaceApi.setCurrentUser(user);
             document.body.style.visibility = "visible";
-            const header = document.querySelector(".admin-topbar-right, .header-right, .teacher-profile");
+            const header = document.querySelector(".admin-topbar-right, .header-right, .teacher-profile, .site-header");
             if (header && !document.querySelector("#learnspaceLogout")) {
                 const button = document.createElement("button");
                 button.id = "learnspaceLogout";

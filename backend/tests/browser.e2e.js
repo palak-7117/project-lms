@@ -45,10 +45,12 @@ async function main() {
         const consoleErrors = [];
         const failedRequests = [];
         const forbiddenResponses = [];
+        const httpErrorResponses = [];
         page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
         page.on("pageerror", (error) => consoleErrors.push(error.message));
         page.on("requestfailed", (request) => failedRequests.push(`${request.method()} ${request.url()} (${request.failure()?.errorText || "unknown failure"})`));
         page.on("response", (response) => { if (response.status() === 403) forbiddenResponses.push(response.url()); });
+        page.on("response", (response) => { if (response.status() >= 400) httpErrorResponses.push(`${response.status()} ${response.url()}`); });
         await page.route("**/favicon.ico", (route) => route.fulfill({ status: 204, body: "" }));
 
         const base = frontend.origin;
@@ -182,6 +184,158 @@ async function main() {
 
         await page.locator("#learnspaceLogout").click();
         await page.waitForURL("**/index.html");
+        await page.locator('.role-card[data-role="teacher"]').click();
+        await page.locator("#email").fill(TEACHER_EMAIL);
+        await page.locator("#password").fill(TEACHER_PASSWORD);
+        await page.locator("#loginForm [type=submit]").click();
+        await page.waitForURL("**/teacher-dashboard.html");
+        await page.locator("#teacherCurriculumStatus").waitFor();
+        await page.locator("#addOfferingBtn").click();
+        await page.locator("#offeringSemesterId").selectOption({ label: `${SEMESTER_NAME} · 2026-2027` });
+        await page.locator("#offeringSubjectId").selectOption({ label: `${SUBJECT_CODE} — Browser Curriculum Subject` });
+        await page.locator("#offeringSectionCode").fill("E2E");
+        await Promise.all([
+            page.waitForURL(/course-detail\.html\?id=/),
+            page.locator("#offeringForm [type=submit]").click()
+        ]);
+        await page.getByRole("heading", { name: "Browser Curriculum Subject" }).waitFor();
+        const [[browserOffering]] = await isolated.pool.execute(
+            "SELECT o.id FROM offerings o JOIN curriculum_subjects cs ON cs.id=o.curriculum_subject_id JOIN semesters s ON s.id=o.semester_id WHERE cs.code=? AND s.name=? AND o.section_code='E2E'",
+            [SUBJECT_CODE, SEMESTER_NAME]
+        );
+        assert.ok(browserOffering?.id, "Teacher offering must be persisted in the isolated schema.");
+
+        await page.locator("#materialTitle").fill("Browser Study Notes");
+        await page.locator("#materialType").selectOption("notes");
+        await page.locator("#materialDescription").fill("Private test material.");
+        await page.locator("#materialFile").setInputFiles({
+            name: "browser-material.pdf", mimeType: "application/pdf",
+            buffer: Buffer.from("%PDF-1.7\nBrowser material fixture\n")
+        });
+        await page.locator(".course-editor-form button[type=submit]").first().click();
+        await page.getByRole("heading", { name: "Browser Study Notes" }).waitFor();
+        const [[browserMaterial]] = await isolated.pool.execute(
+            "SELECT m.id,m.file_asset_id AS assetId FROM materials m WHERE m.offering_id=? AND m.title='Browser Study Notes'",
+            [browserOffering.id]
+        );
+        assert.ok(browserMaterial?.assetId, "Uploaded material metadata and file reference must persist.");
+
+        await page.locator('.course-tab[data-tab="assignments"]').click();
+        await page.locator("#assignmentTitle").fill("Browser Research Assignment");
+        await page.locator("#assignmentDescription").fill("Submit a short response.");
+        await page.locator("#assignmentStart").fill("2026-01-01T00:00");
+        await page.locator("#assignmentDue").fill("2034-12-01T00:00");
+        await page.locator("#assignmentMarks").fill("25");
+        await page.locator("#assignmentStatus").selectOption("published");
+        await page.locator(".course-editor-form button[type=submit]").first().click();
+        await page.getByRole("heading", { name: "Browser Research Assignment" }).waitFor();
+        const [[browserAssignment]] = await isolated.pool.execute(
+            "SELECT id FROM assignments WHERE offering_id=? AND title='Browser Research Assignment'",
+            [browserOffering.id]
+        );
+        assert.ok(browserAssignment?.id, "Assignment must persist in the isolated schema.");
+
+        await page.locator("#learnspaceLogout").click();
+        await page.waitForURL("**/index.html");
+        await page.locator('.role-card[data-role="student"]').click();
+        await page.locator("#email").fill(STUDENT_EMAIL);
+        await page.locator("#password").fill(STUDENT_PASSWORD);
+        await page.locator("#loginForm [type=submit]").click();
+        await page.waitForURL("**/student_courses.html");
+        await page.getByRole("heading", { name: "Browser Curriculum Subject" }).waitFor();
+        await page.getByRole("link", { name: "Open course →" }).click();
+        await page.waitForURL(/course_details\.html\?offeringId=/);
+        await page.getByRole("heading", { name: "Browser Curriculum Subject" }).waitFor();
+        const downloadEvent = page.waitForEvent("download");
+        await page.getByRole("link", { name: "browser-material.pdf" }).click();
+        const materialDownload = await downloadEvent;
+        assert.equal(materialDownload.suggestedFilename(), "browser-material.pdf");
+        await page.locator('.course-tab[data-panel="assignments"]').click();
+        await page.getByRole("button", { name: "Open assignment" }).click();
+        await page.locator("#submissionFile").setInputFiles({
+            name: "browser-answer.pdf", mimeType: "application/pdf",
+            buffer: Buffer.from("%PDF-1.7\nBrowser submission fixture\n")
+        });
+        await page.locator("#demoSubmit").click();
+        await page.getByText("Assignment submitted securely.").waitFor();
+        const [[browserSubmission]] = await isolated.pool.execute(
+            "SELECT sub.id,sub.status FROM assignment_submissions sub WHERE sub.assignment_id=? AND sub.student_profile_id=(SELECT id FROM student_profiles WHERE user_id=(SELECT id FROM users WHERE email=?))",
+            [browserAssignment.id, STUDENT_EMAIL]
+        );
+        assert.equal(browserSubmission.status, "submitted");
+        await page.locator("#closeAssignment").click();
+
+        await page.locator("#learnspaceLogout").click();
+        await page.waitForURL("**/index.html");
+        await page.locator('.role-card[data-role="teacher"]').click();
+        await page.locator("#email").fill(TEACHER_EMAIL);
+        await page.locator("#password").fill(TEACHER_PASSWORD);
+        await page.locator("#loginForm [type=submit]").click();
+        await page.waitForURL("**/teacher-dashboard.html");
+        await page.locator(".teacher-course-card").filter({ hasText: "Browser Curriculum Subject" }).click();
+        await page.waitForURL(/course-detail\.html\?id=/);
+        await page.locator('.course-tab[data-tab="assignments"]').click();
+        await page.getByRole("button", { name: "Review submissions" }).click();
+        const reviewForm = page.locator(".submission-review-list form").first();
+        await reviewForm.getByLabel("Grade").fill("22");
+        await reviewForm.getByLabel("Feedback").fill("Good analysis.");
+        await reviewForm.getByRole("button", { name: "Save grade and feedback" }).click();
+        await page.getByText(/Current grade: 22/).waitFor();
+        const [[browserGrade]] = await isolated.pool.execute("SELECT grade,feedback,status FROM assignment_submissions WHERE id=?", [browserSubmission.id]);
+        assert.equal(Number(browserGrade.grade), 22);
+        assert.equal(browserGrade.feedback, "Good analysis.");
+
+        await page.locator('.course-tab[data-tab="quizzes"]').click();
+        await page.locator("#quizTitle").fill("Browser Google Forms Quiz");
+        await page.locator("#quizUrl").fill("https://docs.google.com/forms/d/e/browser-test/viewform");
+        await page.locator("#quizDescription").fill("Browser test form.");
+        await page.locator("#quizDuration").fill("30");
+        await page.locator("#quizStart").fill("2026-01-01T00:00");
+        await page.locator("#quizDue").fill("2034-12-01T00:00");
+        await page.locator("#quizStatus").selectOption("published");
+        await page.locator(".course-editor-form button[type=submit]").first().click();
+        await page.getByRole("heading", { name: "Browser Google Forms Quiz" }).waitFor();
+
+        await page.locator('.course-tab[data-tab="attendance"]').click();
+        await page.locator("#attendanceTitle").fill("Browser attendance session");
+        await page.locator("#attendanceStart").fill("2026-04-01T09:00");
+        await page.locator("#attendanceEnd").fill("2026-04-01T10:00");
+        await page.locator(".course-editor-form button[type=submit]").first().click();
+        await page.getByRole("heading", { name: "Browser attendance session" }).waitFor();
+        await page.getByRole("button", { name: "Take or correct attendance" }).click();
+        await page.getByLabel("Attendance for Browser Student").selectOption("present");
+        await page.getByText("Saved.", { exact: true }).waitFor();
+        const [[attendancePersisted]] = await isolated.pool.execute(
+            "SELECT ar.attendance_status AS status FROM attendance_records ar JOIN student_profiles sp ON sp.id=ar.student_profile_id JOIN users u ON u.id=sp.user_id WHERE u.email=? AND ar.attendance_session_id=(SELECT id FROM attendance_sessions WHERE offering_id=? AND title='Browser attendance session')",
+            [STUDENT_EMAIL, browserOffering.id]
+        );
+        assert.equal(attendancePersisted.status, "present");
+
+        await page.locator("#learnspaceLogout").click();
+        await page.waitForURL("**/index.html");
+        await page.locator('.role-card[data-role="student"]').click();
+        await page.locator("#email").fill(STUDENT_EMAIL);
+        await page.locator("#password").fill(STUDENT_PASSWORD);
+        await page.locator("#loginForm [type=submit]").click();
+        await page.waitForURL("**/student_courses.html");
+        await page.getByRole("link", { name: "Open course →" }).click();
+        await page.waitForURL(/course_details\.html\?offeringId=/);
+        await page.locator('.course-tab[data-panel="assignments"]').click();
+        await page.getByText("Good analysis.").waitFor();
+        await page.locator('.course-tab[data-panel="quizzes"]').click();
+        assert.match(await page.getByRole("link", { name: "Open Google Form" }).getAttribute("href"), /^https:\/\/docs\.google\.com\/forms\//);
+        await context.route("https://docs.google.com/forms/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<title>Google Forms test stub</title>" }));
+        const openedQuizPromise = context.waitForEvent("page");
+        await page.getByRole("link", { name: "Open Google Form" }).click();
+        const openedQuiz = await openedQuizPromise;
+        await openedQuiz.waitForLoadState();
+        assert.match(openedQuiz.url(), /^https:\/\/docs\.google\.com\/forms\//);
+        await openedQuiz.close();
+        await page.locator('.course-tab[data-panel="attendance"]').click();
+        await page.getByText("present", { exact: true }).waitFor();
+
+        await page.locator("#learnspaceLogout").click();
+        await page.waitForURL("**/index.html");
         await page.locator('.role-card[data-role="student"]').click();
         await page.locator("#email").fill(STUDENT_EMAIL);
         await page.locator("#password").fill(STUDENT_PASSWORD);
@@ -211,16 +365,26 @@ async function main() {
         assert.equal(teacherAdminApiStatus, 403);
 
         assert.deepEqual(forbiddenResponses.map((url) => new URL(url).pathname).sort(), ["/api/admin/students", "/api/admin/summary"]);
+        console.log("Browser HTTP error responses:", JSON.stringify(httpErrorResponses));
+        const unauthenticatedAdminResponses = httpErrorResponses.filter((entry) => entry.startsWith("401 "));
+        assert.ok(unauthenticatedAdminResponses.every((entry) =>
+            ["/api/admin/summary", "/api/admin/students", "/api/admin/teachers", "/api/admin/semesters",
+                "/api/admin/curriculum-subjects", "/api/admin/enrollment-requests"].includes(new URL(entry.slice(4)).pathname)
+        ), "Any in-flight Admin dashboard request after logout must be rejected as unauthenticated.");
         const expectedForbiddenResourceErrors = consoleErrors.filter((message) =>
             message === "Failed to load resource: the server responded with a status of 403 (Forbidden)");
-        const unexpectedConsoleErrors = consoleErrors.filter((message) => !expectedForbiddenResourceErrors.includes(message));
+        const expectedUnauthenticatedErrors = consoleErrors.filter((message) =>
+            message === "Failed to load resource: the server responded with a status of 401 (Unauthorized)");
+        const unexpectedConsoleErrors = consoleErrors.filter((message) =>
+            !expectedForbiddenResourceErrors.includes(message) && !expectedUnauthenticatedErrors.includes(message));
         assert.equal(expectedForbiddenResourceErrors.length, 2, "The deliberate Student and Teacher Admin API denials should be visible as two 403 responses.");
+        assert.equal(expectedUnauthenticatedErrors.length, unauthenticatedAdminResponses.length);
         assert.deepEqual(unexpectedConsoleErrors, [], `Unexpected browser console errors: ${unexpectedConsoleErrors.join(" | ")}`);
         const cancelledRequests = failedRequests.filter((request) => request.includes("(net::ERR_ABORTED)"));
         const unexpectedFailedRequests = failedRequests.filter((request) => !request.includes("(net::ERR_ABORTED)"));
         assert.deepEqual(unexpectedFailedRequests, [], `Failed requests: ${unexpectedFailedRequests.join(" | ")}`);
-        console.log(`Browser diagnostics: 0 unexpected console errors; 2 expected authorization 403s; ${cancelledRequests.length} navigation-cancelled requests; 0 unexpected failed requests.`);
-        console.log("Playwright workflow passed: Admin login/dashboard, Student and Teacher creation, semester/curriculum mapping, Student request and approval, logout, and Student/Teacher page/API restrictions.");
+        console.log(`Browser diagnostics: 0 unexpected console errors; 2 expected role-restriction 403s; ${unauthenticatedAdminResponses.length} in-flight post-logout Admin request(s) rejected with 401; ${cancelledRequests.length} navigation-cancelled requests; 0 unexpected failed requests.`);
+        console.log("Playwright workflow passed: Admin setup and enrollment approval; Teacher offering, material, assignment, quiz, and attendance workflows; Student material download, assignment submission, grade/feedback, Google Forms opening, and attendance; unauthorized Admin page/API rejection.");
     } finally {
         await browser?.close();
         await backend?.stop();

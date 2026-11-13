@@ -40,7 +40,12 @@ async function put(key, buffer) {
 
 async function open(key) {
     const target = getPath(key);
-    return { path: target, stream: require("node:fs").createReadStream(target) };
+    const stream = require("node:fs").createReadStream(target);
+    await new Promise((resolve, reject) => {
+        stream.once("open", resolve);
+        stream.once("error", reject);
+    });
+    return { path: target, stream };
 }
 
 async function remove(key) {

@@ -140,7 +140,7 @@ async function startBackend(databaseName, frontendOrigin) {
         throw new Error(`Test backend did not become ready: ${logs.join("")}`);
     }
     return {
-        port, baseUrl, child, logs,
+        port, baseUrl, child, logs, storagePath,
         async stop() {
             if (child.exitCode !== null) return;
             child.kill("SIGTERM");
@@ -218,6 +218,7 @@ function createApiClient(baseUrl, origin = null) {
         post: (route, body = {}) => send("POST", route, body),
         postMultipart: (route, body) => send("POST", route, body),
         patch: (route, body = {}) => send("PATCH", route, body),
+        put: (route, body) => send("PUT", route, body),
         delete: (route) => send("DELETE", route),
         getCsrf,
         login: async (role, email, password) => { await getCsrf(); return send("POST", `/auth/${role}/login`, { email, password }); },

@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="course_details.css">
     <!-- <script src="course_data.js" defer></script> -->
     <script src="api-client.js" defer></script>
-    <script src="auth-guard.js" data-required-role="student" data-app-scripts="student-access.js,student-offerings.js,course_details.js" defer></script>
+    <script src="auth-guard.js" data-required-role="student" data-app-scripts="student-course-backend.js" defer></script>
 </head>
 <body>
     <main class="page-shell">
@@ -72,6 +72,10 @@
                         role="tab" aria-selected="false" data-panel="quizzes">
                     Quizzes
                 </button>
+                <button class="course-tab" type="button"
+                        role="tab" aria-selected="false" data-panel="attendance">
+                    Attendance
+                </button>
             </nav>
 
             <section class="content-section" id="books"
@@ -94,9 +98,22 @@
                         <p class="eyebrow">PRACTICE &amp; APPLY</p>
                         <h2 id="assignmentsTitle">Assignments</h2>
                     </div>
-                    <span class="section-note">Submission files are saved in this browser</span>
+                    <span class="section-note">Submissions are stored securely with LearnSpace</span>
                 </div>
                 <div class="horizontal-card-list" id="assignmentList"></div>
+            </section>
+
+            <section class="content-section" id="attendance"
+                     aria-labelledby="attendanceRecordsTitle"
+                     data-course-panel="attendance" hidden>
+                <div class="section-heading">
+                    <div>
+                        <p class="eyebrow">YOUR CLASS RECORD</p>
+                        <h2 id="attendanceRecordsTitle">Attendance</h2>
+                    </div>
+                    <span class="section-note">Visible to you and your Teacher</span>
+                </div>
+                <div class="horizontal-card-list" id="attendanceList"></div>
             </section>
 
             <section class="content-section" id="quizzes"

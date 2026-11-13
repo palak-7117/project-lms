@@ -9,7 +9,7 @@
 
     <link rel="stylesheet" href="style.css">
     <script src="api-client.js" defer></script>
-    <script src="auth-guard.js" data-required-role="teacher" data-app-scripts="teacher-access.js,teacher-offerings.js,teacher-dashboard.js" defer></script>
+    <script src="auth-guard.js" data-required-role="teacher" data-app-scripts="teacher-dashboard-backend.js" defer></script>
 </head>
 
 <body>
@@ -215,13 +215,19 @@
             <h2 id="offeringModalTitle">Create an offering.</h2>
 
             <p class="course-modal-intro">
-                Choose an active official subject. Its semester is maintained by Admin.
+                Select an active official subject and the semester mapping maintained by Admin.
             </p>
 
             <form id="offeringForm">
 
                 <label for="offeringSubjectId">Official subject</label>
                 <select id="offeringSubjectId" name="curriculumCourseId" required></select>
+
+                <label for="offeringSemesterId">Semester</label>
+                <select id="offeringSemesterId" name="semesterId" required></select>
+
+                <label for="offeringSectionCode">Section</label>
+                <input id="offeringSectionCode" name="sectionCode" maxlength="40" placeholder="e.g. A">
 
                 <label for="offeringDescription">Description</label>
                 <textarea
