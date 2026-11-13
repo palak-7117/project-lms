@@ -1,15 +1,5 @@
 # LearnSpace LMS
 
-## Project Overview
-
-LearnSpace is a Learning Management System (LMS) for managing academic terms, curriculum, course offerings, learning activities and student progress. Its role-based frontend communicates with a Node.js and Express API backed by MySQL.
-
-The application supports three roles:
-
-- **Admin** manages student and teacher accounts, admission and authorization, semesters, official curriculum mappings, student semester allocations and enrollment requests.
-- **Teacher** creates offerings from the official curriculum, manages course materials and assignments, reviews submissions, records grades, stores Google Forms quiz links/metadata and manages attendance.
-- **Student** requests enrollment, views eligible offerings and course content, submits assignment work, views grading feedback and checks attendance.
-
 ## Technology Stack
 
 | Area | Technologies and tools in the repository |
