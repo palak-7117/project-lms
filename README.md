@@ -1,48 +1,49 @@
-# LearnSpace
+# LearnSpace LMS
 
-LearnSpace is an academic Learning Management System project developed in two related tracks: a browser frontend that originally stores data in localStorage, and a Node.js/Express/MySQL backend with API-connected workflows.
+## Project Overview
 
-> **Project status:** The localStorage frontend and the API-backed backend/frontend workflows were developed and tested in their respective development environments. They have not been completed as one reproducible, unified fresh-machine deployment. Batch 4 / Phase 4 final integration and production deployment were deliberately not undertaken. This repository is an academic development project, not a production-ready release.
+LearnSpace is a Learning Management System (LMS) for managing academic terms, curriculum, course offerings, learning activities and student progress. Its role-based frontend communicates with a Node.js and Express API backed by MySQL.
 
-## Project objectives
+The application supports three roles:
 
-LearnSpace models academic course delivery for three roles:
+- **Admin** manages student and teacher accounts, admission and authorization, semesters, official curriculum mappings, student semester allocations and enrollment requests.
+- **Teacher** creates offerings from the official curriculum, manages course materials and assignments, reviews submissions, records grades, stores Google Forms quiz links/metadata and manages attendance.
+- **Student** requests enrollment, views eligible offerings and course content, submits assignment work, views grading feedback and checks attendance.
 
-- **Admin:** provision Students and Teachers; manage admission and authorization; create semesters and official curriculum subjects; map subjects to semesters; allocate Students; review enrollment requests.
-- **Teacher:** create independent offerings from official mapped subjects and semesters; add materials and assignments; review and grade submissions; store Google Forms quiz metadata; manage attendance.
-- **Student:** request semester enrollment; view eligible offerings; access materials; submit assignment files; see returned grades and feedback; view attendance.
+## Technology Stack
 
-## Two implementation tracks
+| Area | Technologies and tools in the repository |
+|---|---|
+| Frontend | HTML, CSS, browser JavaScript and Fetch API for API-connected pages |
+| Backend | Node.js, Express.js 5 |
+| Database | MySQL; `mysql2` promise driver and connection pool |
+| Configuration and security | `dotenv`, `helmet`, `cors`, `argon2` |
+| Uploads and files | `multer`, private local filesystem storage |
+| Development and tests | `nodemon`, Playwright, Node.js built-in test runner |
 
-| Track | Technologies | Persistence and scope |
-|---|---|---|
-| Original frontend | HTML, CSS, JavaScript | Older role/course modules use localStorage. These remain in the repository as a separate implementation. |
-| Backend-connected workflows | HTML, CSS, JavaScript + Node.js, Express, mysql2, MySQL | Current page entry points load API-backed modules. Data is read/written through the REST API and MySQL; files use private local storage. |
+## Backend Architecture
 
-The tracks are related, but localStorage data is not automatically migrated to MySQL. A completed, reproducible unified deployment is out of scope and has not been verified. Do not interpret test success in one track as evidence that every legacy page/module has been integrated.
-
-## Backend architecture
-
-The backend is a REST-style Express API. The request path is:
+The backend request path is:
 
 ~~~text
-Browser page → frontend/api-client.js fetch → Express app → route middleware
-→ controller → service validation/business rules → mysql2 pool → MySQL
-→ JSON response → frontend renders refreshed state
+Frontend → API request → Express route → middleware → controller → service → MySQL
+                                                                  ↓
+Frontend ← JSON response ←────────────────────────────────────────┘
 ~~~
 
-- **Routes** register URL/method and attach authentication, role and CSRF middleware.
-- **Middleware** validates session cookies, role access, CSRF tokens, uploads and errors.
-- **Controllers** translate HTTP parameters/body into service calls and response envelopes.
-- **Services** own business rules, authorization by resource ownership/eligibility, validation, SQL and transactions.
-- **mysql2/promise** uses a connection pool configured in backend/src/config/db.js.
-- **Storage adapter** uses backend/src/storage/index.js and a local private-file implementation.
+- **Frontend API client** (`frontend/api-client.js`) sends requests with `fetch`, credentials and CSRF headers where needed. API-connected role pages render responses from the backend.
+- **Express app and routes** (`backend/src/app.js`, `backend/src/routes/`) register API paths and HTTP methods. Each route connects middleware to a controller action.
+- **Middleware** (`backend/src/middleware/`) checks sessions and roles, verifies CSRF tokens, processes uploads and formats not-found or error responses. `asyncHandler` forwards rejected asynchronous controller calls to centralized error handling.
+- **Controllers** (`backend/src/controllers/`) read request parameters, authenticated user data and `req.body`, call service functions, and return JSON responses.
+- **Services** (`backend/src/services/`) validate inputs, apply application rules and resource ownership/eligibility checks, run SQL through the database module, and use transactions for related operations.
+- **Database module** (`backend/src/config/db.js`) configures a `mysql2/promise` connection pool for service queries.
+- **File storage** (`backend/src/storage/`) selects the local provider. File routes authorize access before serving private stored content.
 
-Primary route groups: /api/health, /api/auth, /api/admin, /api/student, /api/teacher and /api/files. The detailed endpoint inventory is in [API_REFERENCE.md](docs/project-audit/API_REFERENCE.md).
+The API is mounted under `/api`; its route groups are health, authentication, admin, student, teacher and files.
 
-## Database
+## Database Design
 
-The audited MySQL database learnspace_db contains 19 InnoDB tables using utf8mb4_0900_ai_ci. The schema includes:
+The application source refers to the 19-table MySQL schema used by LearnSpace:
 
 ~~~text
 users, student_profiles, teacher_profiles, user_sessions,
@@ -53,75 +54,141 @@ submission_files, quizzes, attendance_sessions, attendance_records,
 file_assets, file_cleanup_jobs
 ~~~
 
-Important relationships include:
+The relationships represented in service queries include:
 
-- A user has at most one Student or Teacher profile.
-- semesters and curriculum_subjects are many-to-many through semester_subjects.
-- An offering belongs to one Teacher and stores its subject and semester snapshot.
-- Offerings own materials, assignments, quizzes and attendance sessions.
-- assignment_submissions connect one Student to one assignment; the unique pair prevents duplicate submission rows.
-- attendance_records connect a Student to an attendance session.
-- file_assets are associated with materials/submissions and are cleaned up only when unreferenced.
-- user_sessions belong to users and store a hash of the session token.
+- `users` is joined to the role-specific `student_profiles` and `teacher_profiles`; sessions in `user_sessions` refer to users.
+- `semester_subjects` connects semester records and official curriculum subjects. Student allocations and history use student profiles and semesters; enrollment requests record a student's request and its review.
+- `offerings` are created by teachers from curriculum/semester information. Materials, assignments, quizzes and attendance sessions are queried in the context of an offering.
+- `assignment_submissions` associate students with assignments; `submission_files` and `file_assets` support uploaded-file metadata and associations.
+- `attendance_records` are queried by attendance session and student.
 
-See [DATABASE_AUDIT.md](docs/project-audit/DATABASE_AUDIT.md) for columns, indexes, constraints and delete rules.
+**Schema source limitation:** no database DDL or migration baseline is checked into this repository. The source queries show the table joins and key relationships used by the application, but the actual foreign-key declarations, indexes and full column definitions cannot be independently verified from the checked-in files. The existing database must be provisioned separately; do not infer or recreate its schema from this summary.
 
-**Schema setup limitation:** no checked-in SQL DDL or migration file was found. The repository's backend/database/migrations and seeds directories contain no SQL source files. A new developer needs the approved schema artifact/provisioning instructions from the project owner. Do not create tables from memory or point tests at real data.
+## API Documentation
 
-## Authentication and security
+All paths below are mounted under `/api`. Admin routes require an authenticated Admin session. Teacher and Student route groups require the corresponding role. State-changing requests are protected by CSRF middleware as declared in the route files. `{id}` parameters are path values.
 
-The API uses Argon2id password hashes; passwords are not stored as plaintext. Login issues a random opaque session cookie while MySQL stores its SHA-256 token hash in user_sessions. Middleware checks expiry, revocation, account status and (for Students) admission/authorization. Role middleware protects Admin, Teacher and Student routes. Unsafe requests require CSRF validation; CORS uses explicit configured origins. Helmet adds HTTP security headers.
+### Authentication
 
-These are source-level controls, not a production security certification. Deployment, HTTPS/proxy settings, rate limiting, monitoring and recovery have not been verified. Details and findings: [SECURITY_AND_TESTING_AUDIT.md](docs/project-audit/SECURITY_AND_TESTING_AUDIT.md).
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/auth/csrf` | Issue a CSRF token and cookie. |
+| POST | `/api/auth/:role/login` | Sign in for the requested role (`admin`, `teacher` or `student`). |
+| GET | `/api/auth/me` | Return the current authenticated user. |
+| POST | `/api/auth/logout` | Revoke the current session and clear its cookies. |
 
-## File handling
+### Admin
 
-Multer accepts bounded multipart uploads, checks extension and content signature, and the service creates a server-generated storage key and metadata record. Bytes are stored outside the frontend's public directory. GET /api/files/:fileId checks role, ownership or Student eligibility before streaming. Cleanup jobs retry deletion after references are removed.
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/admin/summary` | Dashboard summary. |
+| GET, POST | `/api/admin/students` | List students; create a student. |
+| GET, DELETE | `/api/admin/students/:profileId` | Get or permanently delete a student profile through the deletion service. |
+| PATCH | `/api/admin/students/:profileId/admission` | Update admission status. |
+| PATCH | `/api/admin/students/:profileId/authorization` | Update authorization status. |
+| POST | `/api/admin/students/:profileId/allocation` | Allocate a student to a semester. |
+| GET, POST | `/api/admin/teachers` | List teachers; create a teacher. |
+| GET, DELETE | `/api/admin/teachers/:profileId` | Get or permanently delete a teacher profile through the deletion service. |
+| PATCH | `/api/admin/users/:userId` | Update user details. |
+| PATCH | `/api/admin/users/:userId/status` | Update account status. |
+| GET, POST | `/api/admin/semesters` | List or create semesters. |
+| PATCH | `/api/admin/semesters/:semesterId` | Update a semester. |
+| GET, POST | `/api/admin/curriculum-subjects` | List or create official curriculum subjects. |
+| PATCH | `/api/admin/curriculum-subjects/:subjectId` | Update a curriculum subject. |
+| POST, DELETE | `/api/admin/semesters/:semesterId/subjects/:subjectId` | Add or remove a subject mapping for a semester. |
+| GET | `/api/admin/enrollment-requests` | List student enrollment requests. |
+| PATCH | `/api/admin/enrollment-requests/:requestId/review` | Approve or reject a request. |
 
-Only the local provider is implemented. There is no assignment reference-attachment relationship in the schema; current file workflows cover course materials and Student submission attachments. Cloud storage and durable production file operations are not verified.
+### Teacher
 
-## Recorded testing evidence
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/teacher/curriculum-subjects` | List curriculum subjects available for offerings. |
+| GET, POST | `/api/teacher/offerings` | List or create the teacher's offerings. |
+| GET, PATCH, DELETE | `/api/teacher/offerings/:offeringId` | View, update or delete an offering. |
+| POST | `/api/teacher/offerings/:offeringId/materials` | Add a material, with optional single-file upload. |
+| PATCH, DELETE | `/api/teacher/materials/:materialId` | Update or delete a material. |
+| POST | `/api/teacher/offerings/:offeringId/assignments` | Create an assignment. |
+| PATCH, DELETE | `/api/teacher/assignments/:assignmentId` | Update or delete an assignment. |
+| GET | `/api/teacher/assignments/:assignmentId/submissions` | List submissions for an assignment. |
+| PATCH | `/api/teacher/submissions/:submissionId/grade` | Grade a submission. |
+| POST | `/api/teacher/offerings/:offeringId/quizzes` | Create Google Forms quiz metadata. |
+| PATCH, DELETE | `/api/teacher/quizzes/:quizId` | Update or delete quiz metadata. |
+| GET, POST | `/api/teacher/offerings/:offeringId/attendance-sessions` | List or create attendance sessions. |
+| GET | `/api/teacher/offerings/:offeringId/eligible-students` | List eligible students for an offering. |
+| GET | `/api/teacher/attendance-sessions/:sessionId/roster` | Get a session roster. |
+| PUT | `/api/teacher/attendance-sessions/:sessionId/records/:studentProfileId` | Mark or update a student's attendance record. |
 
-The existing audit recorded:
+### Student
 
-- **npm test:** 11 tests passed, 0 failed, using isolated generated MySQL test schemas.
-- **npm run test:browser:** Playwright workflow passed in installed Chrome 157 after bundled Chromium launch failed. The run covered Admin, Teacher and Student flows, role denials and browser diagnostics.
-- The Google Forms browser check used a controlled test route; it did not verify actual Google Forms submissions or results.
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/student/enrollment-options` | List semester enrollment options. |
+| GET, POST | `/api/student/enrollment-requests` | List or create enrollment requests. |
+| POST | `/api/student/enrollment-requests/:requestId/withdraw` | Withdraw an enrollment request. |
+| GET | `/api/student/offerings` | List offerings available to the student. |
+| GET | `/api/student/offerings/:offeringId` | Get offering content and related course information. |
+| GET, POST | `/api/student/offerings/:offeringId/assignments/:assignmentId/submission` | Retrieve or submit assignment work; submission can include multiple files. |
+| GET | `/api/student/offerings/:offeringId/attendance` | View attendance for an offering. |
 
-These are previously recorded results, not tests rerun while preparing this README. The test harness reads DDL from the configured learnspace_db, creates a generated learnspace_test_b04_* schema for test writes, and drops it on normal completion. Use a dedicated development MySQL account and inspect for leftovers after interrupted runs.
+### Health and Files
 
-## Repository structure
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/health` | Check that the API is responding. |
+| GET | `/api/health/db` | Run a database `SELECT 1` health check. |
+| GET | `/api/files/:fileId` | Download/stream an authorized file for a Teacher or eligible Student. |
 
-~~~text
-project-lms/
-  README.md
-  .gitignore
-  frontend/
-    index.html, style.css, script.js
-    admin-dashboard.html, admin-dashboard-api.js, admin-dashboard.js
-    teacher-dashboard.html, teacher-dashboard-backend.js, teacher-dashboard.js
-    course-detail.html, teacher-course-backend.js, course-detail.js
-    student_courses.html, student-courses-backend.js, student-enrollment.js
-    course_details.html, student-course-backend.js, course_details.js
-    api-client.js, auth-guard.js, role-access modules, assets/
-  backend/
-    .env.example, .gitignore, package.json, package-lock.json
-    src/app.js, src/server.js
-    src/config/, routes/, controllers/, services/, middleware/
-    src/storage/, utils/, scripts/bootstrap-admin.js
-    tests/ (integration tests, browser.e2e.js, browser-session.js, harness.js)
-  docs/project-audit/
-    implementation, architecture, database, API, security and handover guides
-~~~
+The endpoint list is transcribed from `backend/src/routes/`; it describes route registration, while actual request validation and response fields are implemented in controllers and services.
 
-## Local development setup
+## Implemented Features
 
-These instructions start the backend-connected workflows. The original localStorage frontend remains available as a separate implementation.
+### Batch B.0
 
-Prerequisites: Windows, Node.js/npm, MySQL Server 8.x, MySQL Workbench, and Python (or another static file server). Workbench is the database client; MySQL Server runs the database. Clone/open the repository in a local path, then use two PowerShell terminals.
+- Express backend foundation with JSON request parsing, Helmet security headers, configured CORS, centralized not-found/error handling and health endpoints.
+- `dotenv` configuration and a `mysql2/promise` connection pool for the existing MySQL database.
+- Backend project scripts for development, server startup, Admin bootstrap, integration tests and browser tests.
 
-1. Ask the project owner for the approved `learnspace_db` schema artifact or a provisioned development database. No schema DDL is included in this repository. Start MySQL Server, then use Workbench to confirm the owner-provisioned database and approved tables exist. Do not execute unreviewed DDL.
-2. In the first PowerShell terminal, from the repository root:
+### Batch 2
+
+- Password-based login for Admin, Teacher and Student roles, persistent server-side sessions, current-user and logout flows.
+- Admin account creation and management, student admission/authorization and semester allocation.
+- Semester and official curriculum subject management, including semester-subject mappings.
+- Student enrollment request creation/withdrawal and Admin review.
+
+### Batch 3
+
+- Teacher curriculum access and offering creation/management.
+- Course material and assignment management, Student submissions and Teacher grading.
+- Google Forms quiz metadata management.
+- Attendance session creation, eligible-student rosters, attendance marking and Student attendance views.
+- Student-facing offering/course content and restricted file upload/download workflows.
+
+## Authentication and Security
+
+- Passwords are hashed and verified with Argon2id using the `argon2` package.
+- Login creates a cryptographically random opaque session token. The browser receives it in an HTTP-only cookie; MySQL stores its SHA-256 hash in `user_sessions`.
+- Sessions have an eight-hour absolute lifetime and a 30-minute idle timeout. Logout revokes the server-side session. Middleware checks expiry, revocation and account status; Student access also checks admission and authorization state.
+- Role middleware restricts Admin, Teacher and Student route groups. Services additionally check ownership and academic eligibility for resource-specific actions.
+- Unsafe requests use a CSRF cookie/header token comparison, including a timing-safe comparison. The backend checks configured origins.
+- CORS allows explicit origins from `FRONTEND_ORIGIN`; wildcard origins are rejected. Helmet sets HTTP security headers.
+- Session cookies use `SameSite=Lax`; `Secure` is enabled in production, and the production cookie names use the `__Host-` prefix. The CSRF token cookie is readable by frontend JavaScript so it can be sent in the request header.
+- Multer applies upload limits and file checks; stored file bytes are kept in a private local directory outside the static frontend root. File access is authorized before streaming.
+
+These are implemented application controls; they do not establish that the application has been deployed or certified for production use.
+
+## Project Setup and Installation
+
+### Prerequisites
+
+- Node.js and npm.
+- MySQL Server 8.x and access to the existing, owner-provisioned LearnSpace database.
+- MySQL Workbench is optional as a database client; it does not replace the MySQL Server.
+- Python (or another static HTTP server) to serve the frontend pages locally.
+
+### Install and configure
+
+From the repository root, use PowerShell:
 
 ~~~powershell
 cd .\backend
@@ -130,77 +197,60 @@ Copy-Item .env.example .env
 notepad .env
 ~~~
 
-3. Review `.env.example` and fill `.env` with local values for `DB_HOST`, `DB_PORT`, `DB_USER` and `DB_PASSWORD`. The example already sets local defaults for `DB_NAME=learnspace_db`, `PORT=5000`, `HOST=127.0.0.1`, the exact frontend origins, and the private local storage directory/provider. Use a dedicated development account with only the privileges needed for the application and isolated test schemas. Keep `.env` private; never commit or share it.
-4. Bootstrap the first Admin only when the configured database currently has no Admin account. Run this once from the backend directory in an interactive terminal:
+Set local `DB_HOST`, `DB_PORT`, `DB_USER` and `DB_PASSWORD` in `.env`. Review the other settings in `backend/.env.example`, including the database name, server host/port, allowed frontend origins and private local file-storage path. Never commit `.env` or use production credentials for development or testing.
+
+**Database prerequisite:** the backend connects to an existing database; this repository does not include a checked-in schema DDL or migration baseline. Obtain the approved schema or a provisioned development database from the project owner before starting the API. Do not create tables based only on this README.
+
+If the configured database has no Admin account, create its first Admin once from an interactive terminal in the `backend` directory:
 
 ~~~powershell
 npm run bootstrap:admin
 ~~~
 
-The script prompts for the Admin display name and email, then asks for a password and confirmation without echoing the password. It enforces password validation, hashes it with Argon2id, and refuses to run if an Admin already exists. If an Admin is already present, skip this step.
+The script prompts for a display name, email, password and confirmation; password input is not echoed. It refuses to create another Admin when one already exists.
 
-5. Start the backend in the first terminal:
+### Start the backend and frontend
+
+In the first PowerShell terminal, from `backend`:
 
 ~~~powershell
 npm run dev
 ~~~
 
-6. In the second PowerShell terminal, from the repository root, serve the frontend:
+To use the frontend locally, open a second terminal at the repository root:
 
 ~~~powershell
 cd .\frontend
 python -m http.server 5500
 ~~~
 
-7. Open `http://127.0.0.1:5500/index.html`. The backend health endpoints are `http://127.0.0.1:5000/api/health` and `http://127.0.0.1:5000/api/health/db`.
+Open `http://127.0.0.1:5500/index.html`. The default backend health URLs are `http://127.0.0.1:5000/api/health` and `http://127.0.0.1:5000/api/health/db` when using the example host and port settings.
 
-Run automated tests from a third terminal, using the backend directory:
+The backend test commands, run from `backend`, are `npm test` and `npm run test:browser`. The tests require MySQL access; follow the test harness configuration and use an isolated development/test database account.
 
-~~~powershell
-cd .\backend
-npm test
-npm run test:browser
+## Project Structure
+
+~~~text
+project-lms/
+├── README.md
+├── frontend/                 # Role pages, API client and API-connected scripts
+├── backend/
+│   ├── .env.example          # Environment variable names and non-secret defaults/placeholders
+│   ├── package.json          # Runtime dependencies and npm scripts
+│   ├── src/
+│   │   ├── app.js, server.js # Express setup and server entry point
+│   │   ├── config/           # Environment, MySQL pool and authentication configuration
+│   │   ├── routes/           # API route declarations
+│   │   ├── middleware/       # Authentication, roles, CSRF, uploads and error handling
+│   │   ├── controllers/      # HTTP request/response handlers
+│   │   ├── services/         # Application rules, SQL and transactions
+│   │   ├── storage/          # Private local file storage adapter
+│   │   ├── scripts/          # One-time Admin bootstrap
+│   │   └── utils/            # Shared validation and request helpers
+│   └── tests/                # Node integration tests and Playwright browser workflow
+└── .gitignore
 ~~~
 
-The browser test requires a running MySQL server and permission for the harness to create and drop generated `learnspace_test_b04_*` schemas. It copies schema definitions from the configured database and writes test data only to the generated schema. Use a dedicated development MySQL account, never production credentials or data. After an interrupted run, check for leftover generated test schemas before continuing.
+## Conclusion
 
-## Implementation status and limitations
-
-**Implemented in source:** backend foundation; authentication and Admin/academic workflows; Teacher and Student API-connected workflows; scoped data deletion and private file cleanup. The original localStorage frontend remains as a related implementation.
-
-**Not completed or not verified:**
-
-- Batch 4 / Phase 4 final integration and production deployment were not undertaken.
-- LocalStorage data is not migrated to the backend.
-- No checked-in schema DDL/migration baseline.
-- File provider is local only; production backup/restore and durable storage not verified.
-- Assignment reference attachments are not modeled.
-- Google Forms is metadata/link only; live external submission/results are unverified.
-- Deployment, monitoring and recovery procedures are not verified.
-- Git working-tree status currently fails with “this operation must be run in a work tree”; do not assume the checkout is clean.
-
-## Documentation
-
-- [Project overview](docs/project-audit/PROJECT_OVERVIEW.md)
-- [Implementation audit](docs/project-audit/IMPLEMENTATION_AUDIT.md)
-- [Database audit](docs/project-audit/DATABASE_AUDIT.md)
-- [API reference](docs/project-audit/API_REFERENCE.md)
-- [Beginner backend guide](docs/project-audit/BACKEND_LEARNING_GUIDE.md)
-- [Architecture and data flow](docs/project-audit/DATA_FLOW_AND_ARCHITECTURE.md)
-- [Security and testing audit](docs/project-audit/SECURITY_AND_TESTING_AUDIT.md)
-- [Batch 4 handoff](docs/project-audit/PROJECT_HANDOFF_BATCH_4.md)
-- [Team handover guide](docs/project-audit/TEAM_HANDOVER_GUIDE.md)
-- [Proposed Batch 4 task breakdown](docs/project-audit/BATCH_4_TASK_BREAKDOWN.md)
-- [Batch 4 checklist](docs/project-audit/BATCH_4_CHECKLIST.md)
-- [Audit documentation index](docs/project-audit/README.md)
-
-## Suggested screenshots for academic presentation
-
-Capture non-sensitive screenshots from a clean demo/test dataset:
-1. Landing page with the three role choices.
-2. Admin dashboard showing semester/curriculum setup.
-3. Teacher offering and course-material/assignment management.
-4. Student eligible course view and assignment status.
-5. A browser test/report excerpt showing the tested workflows.
-
-Do not include real student data, emails, passwords, session cookies, or private file URLs. No screenshots are included currently.
+LearnSpace provides an Express and MySQL backend for role-based authentication, Admin academic management, Teacher course workflows and Student learning workflows through its API-connected frontend.
